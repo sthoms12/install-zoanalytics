@@ -44,7 +44,7 @@ app.get("/pulse", (c) => new Response(pulsePageHtml(), {
 app.use("/api/analytics/*", async (c, next) => {
   if (!collectorOnly) return next();
   if (c.req.path === "/api/analytics/collect") return next();
-  return c.json({ error: "Collector service exposes only tracker and collect endpoints" }, 404, corsHeaders);
+  return c.json({ error: "Private analytics APIs are unavailable on the public collector" }, 404, corsHeaders);
 });
 app.get("/api/analytics/properties", (c) => c.json({ properties: getProperties() }));
 app.get("/api/analytics/summary", (c) => {

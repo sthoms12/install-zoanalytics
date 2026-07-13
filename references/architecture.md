@@ -2,6 +2,8 @@
 
 The GitHub package is a skill with a bundled, versioned app template. Installation copies source only; runtime state is created fresh on the destination Zo.
 
+The installer repository is not a Zo Site. Its bundled app uses `zosite.template.json`; `scripts/install.ts` creates the destination's runnable `zosite.json`. This prevents the template from appearing in the source account's Hosting inventory.
+
 Data flow:
 
 1. A daily Zo Agent reads native Space, Sites, and Services inventory.

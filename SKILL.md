@@ -7,6 +7,12 @@ description: Install, configure, update, or audit a fresh ZoAnalytics instance f
 
 Install the bundled app template into a new workspace folder and configure public-only discovery.
 
+## Location boundary
+
+- This repository is an installer package, not a runnable Zo Site.
+- `assets/app-template/` must contain `zosite.template.json`, never `zosite.json`. The install script renames it in the destination so Zo does not host the bundled template in place.
+- A user's installed app, runtime database, backups, caches, and publication choices belong only in that user's destination directory.
+
 ## Guardrails
 
 - Never copy an existing `data/` directory, SQLite database, `.env`, credentials, domains, handles, traffic, or cached crawl data.
@@ -78,6 +84,7 @@ Confirm:
 - A browser event for an accepted property is stored while bots and automated browsers are dropped.
 
 Run `/root/.codex/skills/.system/skill-creator/scripts/quick_validate.py` against this skill when modifying its packaging.
+Run `bun scripts/package-audit.ts` to reject generated artifacts, an accidentally runnable template, and known personal markers.
 
 ## Update
 

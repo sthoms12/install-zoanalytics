@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 function value(flag: string) {
@@ -24,7 +24,9 @@ if (existsSync(target) && readdirSync(target).length > 0) throw new Error(`Targe
 mkdirSync(target, { recursive: true });
 cpSync(template, target, { recursive: true, errorOnExist: true });
 
+const templateConfigPath = join(target, "zosite.template.json");
 const configPath = join(target, "zosite.json");
+renameSync(templateConfigPath, configPath);
 const config = JSON.parse(await Bun.file(configPath).text());
 config.local_port = port;
 config.publish.label = label;
