@@ -1,52 +1,28 @@
 import { Glob } from "bun";
 import { db, getProperties, upsertDiscoveredProperty } from "./db";
+import { getActionCenter } from "./product";
 
 const WORKSPACE = "/home/workspace";
 
 function id(prefix: string) { return `${prefix}_${crypto.randomUUID()}`; }
 function slug(value: string) { return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""); }
 
-export type DiscoverySurface = {
-  id?: string;
-  name: string;
-  kind: "space" | "site" | "service";
-  url: string;
-  public: boolean;
-  mode?: string;
-  projectPath?: string | null;
-  source?: string;
-};
+export type DiscoverySurface = { id?: string; name: string; kind: "space" | "site" | "service"; url: string; public: boolean; mode?: string; projectPath?: string | null; source?: string };
 
 function publicUrl(value: string) {
   try {
-    const url = new URL(value);
-    const host = url.hostname.toLowerCase();
-    if (url.protocol !== "https:") return null;
-    if (host === "localhost" || host.endsWith(".local") || host.endsWith(".zo.computer")) return null;
-    if (/^(127\.|10\.|192\.168\.|169\.254\.|0\.)/.test(host)) return null;
-    if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return null;
-    url.hash = "";
-    return url;
-  } catch {
-    return null;
-  }
+    const url = new URL(value); const host = url.hostname.toLowerCase();
+    if (url.protocol !== "https:" || host === "localhost" || host.endsWith(".local") || host.endsWith(".zo.computer")) return null;
+    if (/^(127\.|10\.|192\.168\.|169\.254\.|0\.)/.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host)) return null;
+    url.hash = ""; return url;
+  } catch { return null; }
 }
 
 async function reachableWithoutAuth(url: URL) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10_000);
   try {
-    const response = await fetch(url, {
-      redirect: "follow",
-      signal: controller.signal,
-      headers: { "User-Agent": "ZoAnalytics public-surface discovery" },
-    });
+    const response = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(10_000), headers: { "User-Agent": "ZoAnalytics public-surface discovery" } });
     return response.status >= 200 && response.status < 400;
-  } catch {
-    return false;
-  } finally {
-    clearTimeout(timeout);
-  }
+  } catch { return false; }
 }
 
 export async function importDiscoveryManifest(surfaces: DiscoverySurface[]) {
@@ -59,14 +35,7 @@ export async function importDiscoveryManifest(surfaces: DiscoverySurface[]) {
     if (!url) { skipped.push({ name: surface.name, url: surface.url, reason: "invalid-or-private-url" }); continue; }
     if (!await reachableWithoutAuth(url)) { skipped.push({ name: surface.name, url: surface.url, reason: "not-publicly-reachable" }); continue; }
     const propertyId = slug(surface.id || `${surface.kind}-${url.hostname}${url.pathname === "/" ? "" : `-${url.pathname}`}`);
-    const property = upsertDiscoveredProperty({
-      id: propertyId,
-      name: surface.name,
-      kind: surface.kind,
-      url: url.toString().replace(/\/$/, ""),
-      projectPath: surface.projectPath ?? null,
-      source: surface.source ?? "zo-inventory",
-    });
+    const property = upsertDiscoveredProperty({ id: propertyId, name: surface.name, kind: surface.kind, url: url.toString().replace(/\/$/, ""), projectPath: surface.projectPath ?? null, source: surface.source ?? "zo-inventory" });
     discovered.push({ id: propertyId, name: surface.name, url: property?.url ?? url.toString(), projectPath: property?.projectPath ?? null, status: property?.status ?? "missing-tracker" });
   }
   return { discovered, skipped, total: getProperties().length };
@@ -74,10 +43,12 @@ export async function importDiscoveryManifest(surfaces: DiscoverySurface[]) {
 
 export async function discoverProperties() {
   const existing = new Set(getProperties().map((item) => item.id));
-  const surfaces: DiscoverySurface[] = [];
+  const discovered: Array<{ id: string; name: string; url: string; projectPath: string; status: string }> = [];
   const skipped: Array<{ projectPath: string; reason: string }> = [];
   const glob = new Glob("*/zosite.json");
-  const ownerHandle = process.env.ZO_OWNER_HANDLE?.trim();
+  const configuredHandle = process.env.ZO_OWNER_HANDLE?.trim();
+  const inferredHandle = getProperties().map((item) => item.url.match(/^[a-z]+:\/\/[^/]+-([a-z0-9-]+)\.zocomputer\.io/i)?.[1]).find(Boolean);
+  const ownerHandle = configuredHandle || inferredHandle;
 
   for await (const relative of glob.scan({ cwd: WORKSPACE, onlyFiles: true })) {
     const projectPath = `${WORKSPACE}/${relative.replace(/\/zosite\.json$/, "")}`;
@@ -85,14 +56,16 @@ export async function discoverProperties() {
       const config = await Bun.file(`${WORKSPACE}/${relative}`).json() as { name?: string; publish?: { label?: string; type?: string; public?: boolean; env?: Record<string, string> } };
       if (!config.publish?.label || config.publish.type !== "http") { skipped.push({ projectPath, reason: "not-published-http" }); continue; }
       if (config.publish.public === false || config.publish.env?.ZOANALYTICS_COLLECTOR_ONLY === "true" || config.publish.label === "zoanalytics") { skipped.push({ projectPath, reason: "private-or-collector" }); continue; }
-      if (!ownerHandle) { skipped.push({ projectPath, reason: "owner-handle-required-for-local-url" }); continue; }
       const propertyId = slug(config.name || config.publish.label);
-      if (existing.has(propertyId)) continue;
-      surfaces.push({ id: propertyId, name: config.name || config.publish.label, kind: "site", url: `https://${config.publish.label}-${ownerHandle}.zocomputer.io`, public: true, mode: "http", projectPath, source: "workspace-site" });
+      if (!ownerHandle) { skipped.push({ projectPath, reason: "owner-handle-required" }); continue; }
+      if (existing.has(propertyId)) { db.prepare("UPDATE properties SET last_discovered_at=CURRENT_TIMESTAMP, lifecycle='active', retired_at=NULL WHERE id=?").run(propertyId); continue; }
+      const url = `https://${config.publish.label}-${ownerHandle}.zocomputer.io`;
+      upsertDiscoveredProperty({ id: propertyId, name: config.name || config.publish.label, kind: "site", url, projectPath, source: "workspace-site" });
+      existing.add(propertyId);
+      discovered.push({ id: propertyId, name: config.name || config.publish.label, url, projectPath, status: "missing-tracker" });
     } catch { skipped.push({ projectPath, reason: "invalid-config" }); }
   }
-  const imported = await importDiscoveryManifest(surfaces);
-  return { discovered: imported.discovered, skipped: [...skipped, ...imported.skipped.map((item) => ({ projectPath: item.url, reason: item.reason }))], total: imported.total };
+  return { discovered, skipped, total: getProperties().length };
 }
 
 export function getIntelligence() {
@@ -125,15 +98,19 @@ export function getIntelligence() {
     WHERE created_at >= datetime('now','-30 days') GROUP BY property_id, session_id ORDER BY startedAt DESC LIMIT 20`).all();
 
   const goals = db.query(`SELECT g.id, g.property_id AS propertyId, g.name, g.event_name AS eventName, g.path_pattern AS pathPattern,
-      COUNT(e.id) AS conversions, COUNT(DISTINCT e.property_id || ':' || COALESCE(json_extract(e.payload,'$.sessionId'), e.id)) AS converters
+      COUNT(e.id) AS conversions, COUNT(DISTINCT e.property_id || ':' || COALESCE(e.session_id, e.id)) AS converters
     FROM goals g LEFT JOIN events e ON e.property_id = g.property_id AND e.name = g.event_name
       AND (g.path_pattern IS NULL OR g.path_pattern = '' OR e.path GLOB g.path_pattern)
       AND e.created_at >= datetime('now','-30 days') WHERE g.active = 1 GROUP BY g.id ORDER BY conversions DESC`).all();
 
-  const vitals = db.query(`SELECT property_id AS propertyId, metric, ROUND(AVG(value),1) AS average,
-      ROUND(MAX(value),1) AS worst, COUNT(*) AS samples,
-      SUM(CASE WHEN rating = 'poor' THEN 1 ELSE 0 END) AS poorSamples
-    FROM performance_metrics WHERE created_at >= datetime('now','-30 days') GROUP BY property_id, metric ORDER BY metric`).all();
+  const vitalRows = db.query(`SELECT property_id AS propertyId, metric, value, rating
+    FROM performance_metrics WHERE created_at >= datetime('now','-30 days') ORDER BY property_id, metric, value`).all() as Array<{ propertyId: string; metric: string; value: number; rating: string }>;
+  const vitalGroups = new Map<string, typeof vitalRows>();
+  for (const row of vitalRows) { const key = `${row.propertyId}:${row.metric}`; vitalGroups.set(key, [...(vitalGroups.get(key) ?? []), row]); }
+  const vitals = [...vitalGroups.values()].map((rows) => {
+    const index = Math.min(rows.length - 1, Math.ceil(rows.length * .75) - 1);
+    return { propertyId: rows[0].propertyId, metric: rows[0].metric, p75: Math.round(rows[index].value * 10) / 10, samples: rows.length, poorSamples: rows.filter((row) => row.rating === "poor").length };
+  });
   const errors = db.query(`SELECT property_id AS propertyId, kind, message, source, COUNT(*) AS occurrences, MAX(created_at) AS lastSeenAt
     FROM client_errors WHERE created_at >= datetime('now','-30 days') GROUP BY property_id, kind, message, source ORDER BY occurrences DESC LIMIT 25`).all();
   const changes = db.query(`SELECT property_id AS propertyId, page_url AS pageUrl, field, previous_value AS previousValue,
@@ -158,9 +135,9 @@ export function getIntelligence() {
   const alerts = db.query(`SELECT id, property_id AS propertyId, kind, severity, title, message, status, detected_at AS detectedAt
     FROM alerts WHERE status = 'open' ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END, detected_at DESC LIMIT 30`).all();
   const reports = db.query(`SELECT id, period_start AS periodStart, period_end AS periodEnd, created_at AS createdAt FROM report_snapshots ORDER BY created_at DESC LIMIT 12`).all();
-  const trackerCoverage = db.query(`SELECT id AS propertyId, name, url, status,
+  const trackerCoverage = db.query(`SELECT id AS propertyId, name, url, status, verified_at AS verifiedAt,
       (SELECT MAX(created_at) FROM pageviews WHERE property_id = properties.id) AS lastSignalAt,
-      CASE WHEN status = 'tracked' THEN 1 ELSE 0 END AS installed FROM properties ORDER BY installed, name`).all();
+      CASE WHEN verified_at IS NOT NULL OR status = 'tracked' THEN 1 ELSE 0 END AS installed FROM properties WHERE lifecycle='active' ORDER BY installed, name`).all();
 
   return { sessions, sessionTotals: { sessions: sessionTotals.sessions ?? 0, pagesPerSession: sessionTotals.pagesPerSession ?? 0, averageDurationSeconds: sessionTotals.averageDurationSeconds ?? 0, bounceRate: sessionTotals.bounceRate ?? 0 }, journeys, goals, vitals, errors, changes, linkGraph, orphanPages, campaigns, ranks, backlinks, competitors, alerts, reports, trackerCoverage };
 }
@@ -230,7 +207,18 @@ export function addCompetitor(input: { propertyId: string; name: string; domain:
 export function createWeeklyReport() {
   const periodEnd = new Date(); const periodStart = new Date(periodEnd); periodStart.setUTCDate(periodEnd.getUTCDate() - 7);
   const intelligence = getIntelligence();
-  const payload = { generatedAt: periodEnd.toISOString(), totals: db.query("SELECT COUNT(*) AS pageviews, COUNT(DISTINCT visitor_hash) AS visitors FROM pageviews WHERE created_at >= datetime('now','-7 days')").get(), alerts: intelligence.alerts, changes: intelligence.changes.slice(0,10), backlinks: intelligence.backlinks.slice(0,10), topJourneys: intelligence.journeys.slice(0,10) };
+  const totals = db.query(`SELECT COUNT(*) AS pageviews, COUNT(DISTINCT visitor_hash) AS visitors,
+    COUNT(DISTINCT property_id) AS activeProperties FROM pageviews WHERE created_at >= datetime('now','-7 days')`).get();
+  const previous = db.query(`SELECT COUNT(*) AS pageviews, COUNT(DISTINCT visitor_hash) AS visitors
+    FROM pageviews WHERE created_at >= datetime('now','-14 days') AND created_at < datetime('now','-7 days')`).get() as { pageviews: number; visitors: number };
+  const current = totals as { pageviews: number; visitors: number; activeProperties: number };
+  const change = (value: number, before: number) => before ? Math.round((value - before) / before * 100) : value ? 100 : 0;
+  const payload = {
+    generatedAt: periodEnd.toISOString(), totals, comparison: { pageviews: change(current.pageviews, previous.pageviews), visitors: change(current.visitors, previous.visitors) },
+    summary: current.pageviews ? `${current.visitors} visitors viewed ${current.pageviews} pages across ${current.activeProperties} public properties.` : "No human visits were recorded during this period.",
+    actions: getActionCenter().slice(0, 3), alerts: intelligence.alerts.slice(0, 10), changes: intelligence.changes.slice(0, 10),
+    backlinks: intelligence.backlinks.slice(0, 10), topJourneys: intelligence.journeys.slice(0, 10),
+  };
   const reportId = id("report");
   db.prepare("INSERT INTO report_snapshots (id, period_start, period_end, payload) VALUES (?, ?, ?, ?)").run(reportId, periodStart.toISOString(), periodEnd.toISOString(), JSON.stringify(payload));
   return { id: reportId, ...payload };

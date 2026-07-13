@@ -2,6 +2,8 @@
 
 ZoAnalytics is private analytics for public Zo web surfaces.
 
+Version `0.2.0` adds guided setup, tracker verification without synthetic traffic, an evidence-backed Action Center, unified page detail, goals, ordered funnels, stored briefs, CSV exports, p75 Core Web Vitals including INP, versioned migrations, backup, and doctor workflows.
+
 ## Invariants
 
 - Start with an empty database. Never seed account names, domains, properties, traffic, or credentials.
@@ -20,6 +22,8 @@ bun run discover
 bun run crawl -- --max-pages 20
 bun run intelligence all
 bun run common-crawl-sync
+bun run doctor
+bun run backup
 ```
 
 Discovery reads `data/discovery-manifest.json` and writes `data/discovery-status.json`. The manifest is produced by the scheduled Zo agent from native Space, Sites, and Services inventory.

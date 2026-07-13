@@ -12,6 +12,7 @@ import {
   IconBell, IconGitBranch, IconHeartbeat, IconHistory, IconRoute, IconTrophy,
 } from "@tabler/icons-react";
 import { ThemeProvider } from "@/components/theme-provider";
+import { ActionCenter, Outcomes, PageExplorer, SetupGuide, type ActionData, type BriefData, type FunnelData, type SetupData } from "@/product";
 
 type Property = {
   id: string; name: string; kind: "space" | "site" | "service"; url: string;
@@ -25,6 +26,7 @@ type Dashboard = {
   propertyComparisons: Array<{ propertyId: string; pageviews: number; visitors: number; previousPageviews: number; previousVisitors: number; pageviewsChange: number; visitorsChange: number }>;
   freshness: { traffic: string | null; crawler: string | null; ranks: string | null; backlinks: string | null; authority: string | null };
   sources: Record<string, { kind: string; label: string }>;
+  domainRatings: Array<{ propertyId: string; domainRating: number; capturedAt: string }>;
   authorityScores: Array<{ propertyId: string; releaseId: string; authorityScore: number; referringHosts: number; linkEdges: number; targetHosts: string[]; indexedTargetHosts: string[]; indexedHosts: number; capturedAt: string }>;
   commonCrawlLinks: Array<{ propertyId: string; sourceHost: string; targetHosts: string; linkEdges: number }>;
   properties: Property[];
@@ -38,6 +40,7 @@ type Dashboard = {
   trend: Array<{ date: string; pageviews: number; visitors: number; searchClicks: number; impressions: number }>;
   topPages: Array<{ propertyId: string; path: string; views: number; visitors: number }>;
   searchPages: Array<{ propertyId: string; page: string; clicks: number; impressions: number; position: number }>;
+  rankVisibility: Array<{ propertyId: string; keyword: string; observedPosition: number | null; observedUrl: string | null; engine: string; checkedAt: string }>;
   latestCrawledPages: Array<{ propertyId: string; url: string; path: string; statusCode: number; title: string | null; description: string | null; h1: string | null; wordCount: number; internalLinks: number; externalLinks: number; imagesMissingAlt: number; seoScore: number; htmlBytes: number; loadMs: number; capturedAt: string }>;
   seoFindings: Array<{ propertyId: string; pageUrl: string; severity: "critical" | "warning" | "info"; code: string; message: string; createdAt: string }>;
   keywordCandidates: Array<{ propertyId: string; pageUrl: string; keyword: string; weight: number; source: string }>;
@@ -56,7 +59,7 @@ type Intelligence = {
   sessions: Array<{ propertyId: string; sessionId: string; startedAt: string; endedAt: string; pageviews: number; uniquePages: number; durationSeconds: number; entryPath: string; exitPath: string; referrer: string | null }>;
   journeys: Array<{ propertyId: string; sessionId: string; journey: string; steps: number; startedAt: string }>;
   goals: Array<{ id: string; propertyId: string; name: string; eventName: string; pathPattern: string | null; conversions: number; converters: number }>;
-  vitals: Array<{ propertyId: string; metric: string; average: number; worst: number; samples: number; poorSamples: number }>;
+  vitals: Array<{ propertyId: string; metric: string; p75: number; samples: number; poorSamples: number }>;
   errors: Array<{ propertyId: string; kind: string; message: string; source: string | null; occurrences: number; lastSeenAt: string }>;
   changes: Array<{ propertyId: string; pageUrl: string; field: string; previousValue: string | null; currentValue: string | null; detectedAt: string }>;
   linkGraph: Array<{ propertyId: string; sourceUrl: string; targetUrl: string; external: number }>;
@@ -71,13 +74,15 @@ type Intelligence = {
   collectorOrigin: string;
 };
 
-type View = "overview" | "traffic" | "content" | "seo" | "technical" | "intelligence";
+type View = "overview" | "actions" | "traffic" | "content" | "seo" | "technical" | "outcomes" | "intelligence";
 const views: Array<{ id: View; label: string; icon: typeof IconRadar }> = [
   { id: "overview", label: "Overview", icon: IconRadar },
+  { id: "actions", label: "Actions", icon: IconTargetArrow },
   { id: "traffic", label: "Traffic", icon: IconChartAreaLine },
   { id: "content", label: "Content", icon: IconFileAnalytics },
   { id: "seo", label: "Search & links", icon: IconWorldSearch },
   { id: "technical", label: "Site audit", icon: IconBrandSpeedtest },
+  { id: "outcomes", label: "Outcomes", icon: IconTrophy },
   { id: "intelligence", label: "Intelligence", icon: IconSparkles },
 ];
 
@@ -94,6 +99,10 @@ export default function App() {
 function DashboardApp() {
   const [data, setData] = useState<Dashboard | null>(null);
   const [intelligence, setIntelligence] = useState<Intelligence | null>(null);
+  const [setup, setSetup] = useState<SetupData | null>(null);
+  const [actions, setActions] = useState<ActionData[]>([]);
+  const [funnels, setFunnels] = useState<FunnelData[]>([]);
+  const [briefs, setBriefs] = useState<BriefData[]>([]);
   const [view, setView] = useState<View>("overview");
   const [property, setProperty] = useState("all");
   const [days, setDays] = useState(30);
@@ -104,13 +113,17 @@ function DashboardApp() {
   async function load() {
     setLoading(true); setError("");
     try {
-      const [summaryResponse, intelligenceResponse] = await Promise.all([
+      const [summaryResponse, intelligenceResponse, setupResponse, actionsResponse, funnelsResponse, briefsResponse] = await Promise.all([
         fetch(`/api/analytics/summary?days=${days}`, { headers: { Accept: "application/json" } }),
         fetch("/api/analytics/intelligence", { headers: { Accept: "application/json" } }),
+        fetch("/api/analytics/setup", { headers: { Accept: "application/json" } }),
+        fetch("/api/analytics/actions", { headers: { Accept: "application/json" } }),
+        fetch("/api/analytics/funnels", { headers: { Accept: "application/json" } }),
+        fetch("/api/analytics/briefs", { headers: { Accept: "application/json" } }),
       ]);
-      if (!summaryResponse.ok || !intelligenceResponse.ok) throw new Error(`Dashboard request failed (${summaryResponse.status}/${intelligenceResponse.status})`);
-      const [summary, signals] = await Promise.all([summaryResponse.json(), intelligenceResponse.json()]);
-      setData(summary); setIntelligence(signals);
+      if (![summaryResponse, intelligenceResponse, setupResponse, actionsResponse, funnelsResponse, briefsResponse].every((response) => response.ok)) throw new Error("One or more dashboard signals could not be read");
+      const [summary, signals, setupState, actionState, funnelState, briefState] = await Promise.all([summaryResponse.json(), intelligenceResponse.json(), setupResponse.json(), actionsResponse.json(), funnelsResponse.json(), briefsResponse.json()]);
+      setData(summary); setIntelligence(signals); setSetup(setupState); setActions(actionState.actions); setFunnels(funnelState.funnels); setBriefs(briefState.briefs);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Dashboard request failed"); }
     finally { setLoading(false); }
   }
@@ -129,7 +142,6 @@ function DashboardApp() {
   if (!data) return <LoadingState error={error} retry={load} />;
   const filtered = filterDashboard(data, property);
   const name = property === "all" ? "All properties" : data.properties.find((item) => item.id === property)?.name ?? property;
-  const critical = filtered.actionItems.filter((item) => item.severity === "critical").length;
   const score = healthScore(filtered);
 
   return (
@@ -151,7 +163,7 @@ function DashboardApp() {
               <button onClick={() => void crawl()} disabled={crawling} className="za-primary-button"><IconBolt size={16} className={crawling ? "animate-pulse" : ""} /><span>{crawling ? "Crawling" : "Run audit"}</span></button>
             </div>
           </div>
-          <nav className="-mx-1 flex gap-1 overflow-x-auto pb-2 lg:hidden" aria-label="Dashboard views">
+          <nav className="za-scrollbar-none -mx-1 flex gap-1 overflow-x-auto pb-2 lg:hidden" aria-label="Dashboard views">
             {views.map(({ id, label, icon: Icon }) => <NavButton key={id} active={view === id} onClick={() => setView(id)} icon={Icon} label={label} />)}
           </nav>
         </header>
@@ -163,7 +175,7 @@ function DashboardApp() {
           </div>
           <div className="flex flex-col items-start gap-2 lg:items-end">
             <span className="text-[10px] font-semibold uppercase tracking-[.16em] text-[#65736f]">Scope & period</span>
-            <div className="flex max-w-full gap-2 overflow-x-auto pb-1">
+            <div className="za-scrollbar-none flex max-w-full gap-2 overflow-x-auto pb-1">
               <div className="relative"><IconFilter className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#71807c]" size={15}/><select aria-label="Property scope" value={property} onChange={(event) => setProperty(event.target.value)} className="h-10 min-w-48 appearance-none rounded-lg border border-white/10 bg-white/[.045] pl-9 pr-9 text-sm font-medium text-[#dbe6e3] outline-none transition focus:border-[#58e0c0]/60 focus:ring-2 focus:ring-[#58e0c0]/15"><option value="all">All properties</option>{data.properties.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><IconChevronRight className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rotate-90 text-[#71807c]" size={14}/></div>
               <div className="flex rounded-lg border border-white/10 bg-white/[.025] p-1">{[7,14,30,90].map((value) => <button key={value} onClick={() => setDays(value)} className={`rounded-md px-2.5 text-xs font-semibold tabular-nums transition ${days === value ? "bg-[#58e0c0] text-[#07110e]" : "text-[#71807c] hover:text-white"}`}>{value}d</button>)}</div>
             </div>
@@ -173,8 +185,9 @@ function DashboardApp() {
         {error && <div className="mb-5 flex items-center justify-between gap-3 rounded-lg border border-[#ff796f]/25 bg-[#ff796f]/8 px-4 py-3 text-sm text-[#ffc2bd]"><span>{error}</span><button onClick={() => setError("")} className="text-xs font-semibold">Dismiss</button></div>}
 
         <div id="dashboard-content">
+          {setup && <SetupGuide setup={setup} onRefresh={load} onAudit={crawl} />}
           <section className="mb-6 grid gap-px overflow-hidden rounded-xl border border-white/[.08] bg-white/[.08] sm:grid-cols-2 xl:grid-cols-5">
-            <Kpi label="Portfolio health" value={`${score}`} suffix="/100" note={`${critical} critical issues`} icon={IconSparkles} accent />
+            <Kpi label="Portfolio health" value={`${score}`} suffix="/100" note={`${filtered.totals.tracked}/${filtered.totals.properties} tracked · ${filtered.totals.averageSeoScore || 0} audit`} icon={IconSparkles} accent />
             <Kpi label="Pageviews" value={n(filtered.totals.pageviews)} note={`${trend(filtered.comparison.pageviews)} vs previous period`} icon={IconActivity} />
             <Kpi label="Visitors" value={n(filtered.totals.visitors)} note={`${trend(filtered.comparison.visitors)} vs previous period`} icon={IconSearch} />
             <Kpi label="Crawled pages" value={n(filtered.totals.crawledPages)} note={`${filtered.totals.averageSeoScore || 0} average SEO score`} icon={IconSeo} />
@@ -186,10 +199,12 @@ function DashboardApp() {
           {property !== "all" && <PropertyBrief data={filtered} property={data.properties.find((item) => item.id === property)!} />}
 
           {view === "overview" && <Overview data={filtered} name={name} onSelectProperty={setProperty} />}
+          {view === "actions" && <ActionCenter actions={actions.filter((item) => property === "all" || item.propertyId === property)} properties={data.properties} onRefresh={load} />}
           {view === "traffic" && <Traffic data={filtered} />}
           {view === "content" && <Content data={filtered} />}
           {view === "seo" && <SearchLinks data={filtered} />}
           {view === "technical" && <Technical data={filtered} />}
+          {view === "outcomes" && intelligence && <Outcomes properties={filtered.properties} goals={filterIntelligence(intelligence, property).goals} funnels={funnels.filter((item) => property === "all" || item.propertyId === property)} briefs={briefs} onRefresh={load} />}
           {view === "intelligence" && intelligence && <IntelligenceView data={filtered} intelligence={filterIntelligence(intelligence, property)} reload={load} />}
         </div>
       </div>
@@ -225,18 +240,21 @@ function Traffic({ data }: { data: Dashboard }) {
 }
 
 function Content({ data }: { data: Dashboard }) {
-  return <div className="space-y-4"><section className="grid gap-4 xl:grid-cols-[1.2fr_.8fr]"><Panel title="Opportunity map" eyebrow="Traffic × content quality" icon={IconSparkles}><OpportunityList data={data} expanded/></Panel><Panel title="Keyword themes" eyebrow="Inferred from your pages" icon={IconSearch}><KeywordCloud data={data}/></Panel></section><Panel title="Content inventory" eyebrow={`${data.latestCrawledPages.length} recent page snapshots`} icon={IconFileAnalytics}><PageAuditTable data={data}/></Panel></div>;
+  return <div className="space-y-4"><section className="grid gap-4 xl:grid-cols-[1.2fr_.8fr]"><Panel title="Opportunity map" eyebrow="Traffic × content quality" icon={IconSparkles}><OpportunityList data={data} expanded/></Panel><Panel title="Keyword themes" eyebrow="Inferred from your pages" icon={IconSearch}><KeywordCloud data={data}/></Panel></section><PageExplorer pages={data.latestCrawledPages} properties={data.properties}/></div>;
 }
 
 function SearchLinks({ data }: { data: Dashboard }) {
   return <div className="space-y-4">
     <div className="rounded-xl border border-[#58e0c0]/15 bg-[#58e0c0]/[.04] p-4 text-sm leading-6 text-[#a9c4bc]"><span className="font-semibold text-[#70d9b9]">Independent data model:</span> rankings are observed from public results, exact referrals come from the first-party tracker, and the wider link graph comes from Common Crawl. Zo Authority is a transparent 0–100 logarithmic score based on unique referring hosts.</div>
-    {data.authorityScores.length > 0 && <section className="grid gap-px overflow-hidden rounded-xl border border-white/[.08] bg-white/[.08] sm:grid-cols-2 xl:grid-cols-5">{data.authorityScores.map((row) => <article key={row.propertyId} className="bg-[#0d1315] p-4"><p className="truncate text-[10px] font-semibold uppercase tracking-[.14em] text-[#71807c]">{propertyName(data.properties, row.propertyId)}</p><p className="mt-3 text-3xl font-semibold tabular-nums">{row.indexedHosts ? row.authorityScore : "—"}{row.indexedHosts > 0 && <span className="ml-1 text-sm font-medium text-[#71807c]">ZA</span>}</p><p className="mt-1 text-[10px] text-[#61706c]">{row.indexedHosts ? `${row.referringHosts} referring hosts` : "Not indexed in this release"} · {row.releaseId.replace("cc-main-", "")}</p></article>)}</section>}
+    {data.authorityScores.length > 0 && <section className="grid gap-px overflow-hidden rounded-xl border border-white/[.08] bg-white/[.08] sm:grid-cols-2 xl:grid-cols-5">{data.authorityScores.map((row) => {
+      const comparison = data.domainRatings.find((item) => item.propertyId === row.propertyId);
+      return <article key={row.propertyId} className="bg-[#0d1315] p-4"><p className="truncate text-[10px] font-semibold uppercase tracking-[.14em] text-[#71807c]">{propertyName(data.properties, row.propertyId)}</p><p className="mt-3 text-3xl font-semibold tabular-nums">{row.indexedHosts ? row.authorityScore : "—"}{row.indexedHosts > 0 && <span className="ml-1 text-sm font-medium text-[#71807c]">ZA</span>}</p><p className="mt-1 text-[10px] text-[#61706c]">{row.indexedHosts ? `${row.referringHosts} referring hosts` : "Not indexed in this release"} · {row.releaseId.replace("cc-main-", "")}</p>{comparison && <p className="mt-2 text-[9px] uppercase tracking-wider text-[#52605d]">Ahrefs comparison: DR {comparison.domainRating}</p>}</article>;
+    })}</section>}
     <section className="grid gap-4 xl:grid-cols-[1.15fr_.85fr]">
       <Panel title="Common Crawl link graph" eyebrow="Independent host-level index" icon={IconGitBranch}>{data.commonCrawlLinks.length ? <RankedRows rows={data.commonCrawlLinks.map((row) => ({ title: row.sourceHost, label: propertyName(data.properties, row.propertyId), value: row.linkEdges, suffix: "target hosts" }))}/> : <Empty icon={IconGitBranch} title={data.authorityScores.length ? "No tracked hosts indexed yet" : "Awaiting the first graph sync"} text={data.authorityScores.length ? "The latest release predates these public surfaces. A later release will be picked up automatically." : "The Common Crawl release will reveal referring hosts beyond traffic that has already reached you."}/>}</Panel>
       <Panel title="Observed referrals" eyebrow="Links that sent real traffic" icon={IconLink}>{data.referrerDomains.length ? <RankedRows rows={data.referrerDomains.map((row) => ({ title: row.referrer, label: propertyName(data.properties, row.propertyId), value: row.visits, suffix: "visits" }))}/> : <Empty icon={IconLink} title="No referrals observed" text="External referrers appear here as they send real traffic."/>}</Panel>
     </section>
-    <section className="grid gap-4 xl:grid-cols-[1.2fr_.8fr]"><Panel title="Search visibility" eyebrow="Clicks, impressions and position" icon={IconWorldSearch}><SearchChart data={data}/><RankedRows rows={data.searchPages.map((row) => ({ title: row.page, label: propertyName(data.properties, row.propertyId), value: row.clicks, suffix: `${row.impressions} impr · pos ${row.position}` }))}/></Panel><Panel title="Keyword landscape" eyebrow="Locally inferred topics and relevance" icon={IconSearch}><KeywordCloud data={data}/></Panel></section>
+    <section className="grid gap-4 xl:grid-cols-[1.2fr_.8fr]"><Panel title={data.totals.impressions ? "Google search visibility" : "Observed public rankings"} eyebrow={data.totals.impressions ? "Google-reported clicks, impressions and position" : "Independent checks · not Google impression data"} icon={IconWorldSearch}>{data.totals.impressions ? <><SearchChart data={data}/><RankedRows rows={data.searchPages.map((row) => ({ title: row.page, label: propertyName(data.properties, row.propertyId), value: row.clicks, suffix: `${row.impressions} impr · pos ${row.position}` }))}/></> : <ObservedRanks rows={data.rankVisibility} properties={data.properties}/>}</Panel><Panel title="Keyword landscape" eyebrow="Locally inferred topics and relevance" icon={IconSearch}><KeywordCloud data={data}/></Panel></section>
   </div>;
 }
 
@@ -274,7 +292,7 @@ function IntelligenceView({ data, intelligence, reload }: { data: Dashboard; int
     </section>
     <section className="grid gap-4 xl:grid-cols-[1.15fr_.85fr]">
       <Panel title="Visitor journeys" eyebrow="Privacy-safe session paths" icon={IconRoute}>{sessionRows.length ? <RankedRows rows={sessionRows}/> : <Empty icon={IconRoute} title="New tracker data is needed" text="Sessions and journeys begin populating as upgraded tracker events arrive."/>}</Panel>
-      <Panel title="Core Web Vitals" eyebrow="Real-user performance" icon={IconHeartbeat}>{intelligence.vitals.length ? <div className="grid gap-px overflow-hidden rounded-lg bg-white/[.07] sm:grid-cols-2">{intelligence.vitals.map((item) => <div key={`${item.propertyId}-${item.metric}`} className="bg-[#0d1315] p-4"><div className="flex items-center justify-between"><p className="text-xs font-semibold text-[#93a19d]">{item.metric}</p><span className={item.poorSamples ? "text-[10px] text-[#ff8178]" : "text-[10px] text-[#70d9b9]"}>{item.poorSamples ? `${item.poorSamples} poor` : "healthy"}</span></div><p className="mt-3 text-3xl font-semibold tabular-nums">{item.average}</p><p className="mt-1 text-[10px] text-[#61706c]">{propertyName(data.properties,item.propertyId)} · {item.samples} samples</p></div>)}</div> : <Empty icon={IconHeartbeat} title="Collecting field performance" text="LCP, CLS and TTFB arrive automatically from the upgraded tracker."/>}</Panel>
+      <Panel title="Core Web Vitals" eyebrow="Real-user p75 performance" icon={IconHeartbeat}>{intelligence.vitals.length ? <div className="grid gap-px overflow-hidden rounded-lg bg-white/[.07] sm:grid-cols-2">{intelligence.vitals.map((item) => <div key={`${item.propertyId}-${item.metric}`} className="bg-[#0d1315] p-4"><div className="flex items-center justify-between"><p className="text-xs font-semibold text-[#93a19d]">{item.metric}</p><span className={item.poorSamples ? "text-[10px] text-[#ff8178]" : "text-[10px] text-[#70d9b9]"}>{item.samples < 10 ? "low sample" : item.poorSamples ? `${item.poorSamples} poor` : "healthy"}</span></div><p className="mt-3 text-3xl font-semibold tabular-nums">{item.p75}</p><p className="mt-1 text-[10px] text-[#61706c]">{propertyName(data.properties,item.propertyId)} · p75 · {item.samples} samples</p></div>)}</div> : <Empty icon={IconHeartbeat} title="Collecting field performance" text="LCP, INP and CLS arrive automatically; TTFB remains a diagnostic."/>}</Panel>
     </section>
     <section className="grid gap-4 lg:grid-cols-3">
       <Panel title="Change intelligence" eyebrow="What changed between crawls" icon={IconHistory}>{intelligence.changes.length ? <div className="space-y-1">{intelligence.changes.slice(0,8).map((item,index) => <div key={`${item.pageUrl}-${index}`} className="rounded-lg px-2 py-3 hover:bg-white/[.03]"><p className="text-sm font-medium text-[#dce6e3]">{item.field} changed</p><p className="mt-1 truncate text-[10px] text-[#65736f]">{propertyName(data.properties,item.propertyId)} · {item.pageUrl}</p></div>)}</div> : <Empty icon={IconHistory} title="No crawl changes yet" text="The next crawl will compare titles, metadata, status and SEO scores."/>}</Panel>
@@ -337,6 +355,10 @@ function RankedRows({ rows }: { rows: Array<{ title: string; label: string; valu
   return <div className="space-y-3">{rows.slice(0, 10).map((row) => <div key={`${row.label}-${row.title}`}><div className="mb-1.5 flex items-end justify-between gap-3"><div className="min-w-0"><p className="truncate text-sm text-[#dce6e3]">{row.title}</p><p className="truncate text-[10px] text-[#61706c]">{row.label}</p></div><div className="shrink-0 text-right"><span className="text-sm font-semibold tabular-nums">{n(row.value)}</span><span className="ml-1 text-[10px] text-[#65736f]">{row.suffix}</span></div></div><div className="h-1 overflow-hidden rounded-full bg-white/[.055]"><div className="h-full rounded-full bg-[#58e0c0]/70" style={{ width: `${Math.max(3, row.value / max * 100)}%` }}/></div></div>)}{!rows.length && <Empty icon={IconActivity} title="Waiting for traffic" text="Tracked visits will populate this view."/>}</div>;
 }
 
+function ObservedRanks({ rows, properties }: { rows: Dashboard["rankVisibility"]; properties: Property[] }) {
+  return <div className="space-y-1">{rows.map((row) => <div key={`${row.propertyId}:${row.keyword}`} className="grid grid-cols-[1fr_auto] gap-3 rounded-lg px-2 py-3 hover:bg-white/[.03]"><div><p className="text-sm text-[#dce6e3]">{row.keyword}</p><p className="mt-1 text-[10px] text-[#61706c]">{propertyName(properties, row.propertyId)} · {row.engine} · {when(row.checkedAt)}</p></div><p className="text-right text-sm font-semibold tabular-nums">{row.observedPosition ? `#${row.observedPosition}` : "—"}<span className="block text-[9px] font-normal uppercase tracking-wider text-[#61706c]">observed</span></p></div>)}{!rows.length && <Empty icon={IconWorldSearch} title="No rankings observed yet" text="Add watched keywords or run the ranking observer after the first content audit."/>}</div>;
+}
+
 function MixBars({ data }: { data: Dashboard }) {
   const total = data.deviceSummary.reduce((sum, row) => sum + row.visits, 0) || 1;
   return <div className="space-y-5">{data.deviceSummary.map((row) => { const share = row.visits / total; return <div key={row.device}><div className="mb-2 flex items-center justify-between text-sm"><span>{row.device}</span><span className="tabular-nums text-[#81908c]">{pct(share)} · {row.visits}</span></div><div className="h-2 rounded-full bg-white/[.06]"><div className="h-2 rounded-full bg-[#58e0c0]" style={{ width: `${share * 100}%` }}/></div></div>})}</div>;
@@ -379,7 +401,7 @@ function filterDashboard(data: Dashboard, id: string): Dashboard {
   const propertyComparison = data.propertyComparisons.find((item) => item.propertyId === id);
   const comparison = propertyComparison ? { pageviews: propertyComparison.pageviewsChange, visitors: propertyComparison.visitorsChange, previousPageviews: propertyComparison.previousPageviews, previousVisitors: propertyComparison.previousVisitors } : { pageviews: 0, visitors: 0, previousPageviews: 0, previousVisitors: 0 };
   const totals = { ...data.totals, properties: properties.length, tracked: properties.filter((item) => item.status === "tracked").length, missingTracker: properties.filter((item) => item.status === "missing-tracker").length, pageviews: rollups.reduce((sum, row) => sum + row.pageviews, 0), visitors: rollups.reduce((sum, row) => sum + row.visitors, 0), crawledPages: rollups.reduce((sum, row) => sum + row.crawledPages, 0), averageSeoScore: rollups[0]?.averageSeoScore ?? 0, brokenPages: rollups.reduce((sum, row) => sum + row.brokenPages, 0), missingTitles: rollups.reduce((sum, row) => sum + row.missingTitles, 0), missingDescriptions: rollups.reduce((sum, row) => sum + row.missingDescriptions, 0), thinPages: rollups.reduce((sum, row) => sum + row.thinPages, 0) };
-  return { ...data, properties, comparison, totals, propertyRollups: rollups, authorityScores: data.authorityScores.filter(owns), commonCrawlLinks: data.commonCrawlLinks.filter(owns), topPages: data.topPages.filter(owns), searchPages: data.searchPages.filter(owns), latestCrawledPages: data.latestCrawledPages.filter(owns), seoFindings: data.seoFindings.filter(owns), keywordCandidates: data.keywordCandidates.filter(owns), referrerDomains: data.referrerDomains.filter(owns), eventSummary: data.eventSummary.filter(owns), recentActivity: data.recentActivity.filter(owns), referrerSummary: data.referrerSummary.filter(owns), deviceSummary: data.deviceSummary.filter(owns), opportunityPages: data.opportunityPages.filter(owns), actionItems: data.actionItems.filter(owns) };
+  return { ...data, properties, comparison, totals, propertyRollups: rollups, domainRatings: data.domainRatings.filter(owns), authorityScores: data.authorityScores.filter(owns), commonCrawlLinks: data.commonCrawlLinks.filter(owns), topPages: data.topPages.filter(owns), searchPages: data.searchPages.filter(owns), rankVisibility: data.rankVisibility.filter(owns), latestCrawledPages: data.latestCrawledPages.filter(owns), seoFindings: data.seoFindings.filter(owns), keywordCandidates: data.keywordCandidates.filter(owns), referrerDomains: data.referrerDomains.filter(owns), eventSummary: data.eventSummary.filter(owns), recentActivity: data.recentActivity.filter(owns), referrerSummary: data.referrerSummary.filter(owns), deviceSummary: data.deviceSummary.filter(owns), opportunityPages: data.opportunityPages.filter(owns), actionItems: data.actionItems.filter(owns) };
 }
 
 function filterIntelligence(data: Intelligence, id: string): Intelligence {

@@ -53,6 +53,8 @@ export type CollectPayload = {
   campaign?: { source?: string; medium?: string; campaign?: string; content?: string; term?: string };
 };
 
+export const APP_VERSION = "0.2.0";
+
 export type CrawlPageInput = {
   propertyId: string;
   url: string;
@@ -133,6 +135,18 @@ function migrate() {
       ctr REAL NOT NULL DEFAULT 0,
       position REAL NOT NULL DEFAULT 0,
       PRIMARY KEY (property_id, date, page, query)
+    );
+
+    CREATE TABLE IF NOT EXISTS ahrefs_metrics (
+      property_id TEXT NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
+      captured_at TEXT NOT NULL,
+      domain_rating REAL,
+      url_rating REAL,
+      referring_domains INTEGER,
+      backlinks INTEGER,
+      organic_keywords INTEGER,
+      organic_traffic INTEGER,
+      PRIMARY KEY (property_id, captured_at)
     );
 
     CREATE TABLE IF NOT EXISTS crawl_runs (
@@ -315,6 +329,52 @@ function migrate() {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      version INTEGER PRIMARY KEY,
+      applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS action_states (
+      action_key TEXT PRIMARY KEY,
+      status TEXT NOT NULL DEFAULT 'open',
+      snoozed_until TEXT,
+      note TEXT,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS funnels (
+      id TEXT PRIMARY KEY,
+      property_id TEXT NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      window_minutes INTEGER NOT NULL DEFAULT 60,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS funnel_steps (
+      id TEXT PRIMARY KEY,
+      funnel_id TEXT NOT NULL REFERENCES funnels(id) ON DELETE CASCADE,
+      position INTEGER NOT NULL,
+      step_type TEXT NOT NULL,
+      value TEXT NOT NULL,
+      UNIQUE(funnel_id, position)
+    );
+
+    CREATE TABLE IF NOT EXISTS surface_aliases (
+      property_id TEXT NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
+      url TEXT NOT NULL,
+      active INTEGER NOT NULL DEFAULT 1,
+      first_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (property_id, url)
+    );
+
     CREATE TABLE IF NOT EXISTS common_crawl_targets (
       property_id TEXT NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
       hostname TEXT NOT NULL,
@@ -368,6 +428,14 @@ function migrate() {
   ensureColumn("pageviews", "utm_term", "TEXT");
   ensureColumn("common_crawl_snapshots", "indexed_target_hosts", "TEXT NOT NULL DEFAULT '[]'");
   ensureColumn("common_crawl_snapshots", "indexed_hosts", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn("events", "session_id", "TEXT");
+  ensureColumn("properties", "verified_at", "TEXT");
+  ensureColumn("properties", "last_discovered_at", "TEXT");
+  ensureColumn("properties", "lifecycle", "TEXT NOT NULL DEFAULT 'active'");
+  ensureColumn("properties", "retired_at", "TEXT");
+  db.prepare("UPDATE properties SET lifecycle='retired', retired_at=COALESCE(retired_at, CURRENT_TIMESTAMP) WHERE url NOT LIKE 'http%'").run();
+  db.prepare("INSERT OR IGNORE INTO schema_migrations (version) VALUES (2)").run();
+  db.prepare("INSERT INTO app_settings (key, value) VALUES ('app_version', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP").run(APP_VERSION);
 }
 
 function ensureColumn(table: string, column: string, definition: string) {
@@ -396,6 +464,7 @@ export function getProperties(): Property[] {
     SELECT id, name, kind, url, project_path AS projectPath, status, tags,
       gsc_property AS gscProperty, ahrefs_target AS ahrefsTarget
     FROM properties
+    WHERE lifecycle = 'active'
     ORDER BY name COLLATE NOCASE
   `).all() as Property[];
 }
@@ -410,19 +479,13 @@ export function getProperty(id: string): Property | null {
 }
 
 export function upsertDiscoveredProperty(input: DiscoveredProperty) {
-  db.prepare(`
-    INSERT INTO properties (id, name, kind, url, project_path, status, tags)
-    VALUES (?, ?, ?, ?, ?, 'missing-tracker', ?)
-    ON CONFLICT(id) DO UPDATE SET
-      name = excluded.name,
-      kind = excluded.kind,
-      url = excluded.url,
-      project_path = COALESCE(excluded.project_path, properties.project_path),
-      tags = excluded.tags,
-      updated_at = CURRENT_TIMESTAMP
-  `).run(input.id, input.name, input.kind, input.url, input.projectPath ?? null, `auto-discovered,public,${input.source ?? "manifest"}`);
-  const hostname = new URL(input.url).hostname.toLowerCase();
-  db.prepare("INSERT OR IGNORE INTO common_crawl_targets (property_id, hostname) VALUES (?, ?)").run(input.id, hostname);
+  db.prepare(`INSERT INTO properties (id, name, kind, url, project_path, status, tags, last_discovered_at, lifecycle)
+    VALUES (?, ?, ?, ?, ?, 'missing-tracker', ?, CURRENT_TIMESTAMP, 'active')
+    ON CONFLICT(id) DO UPDATE SET name=excluded.name, kind=excluded.kind, url=excluded.url,
+      project_path=COALESCE(excluded.project_path, properties.project_path), tags=excluded.tags,
+      last_discovered_at=CURRENT_TIMESTAMP, lifecycle='active', retired_at=NULL, updated_at=CURRENT_TIMESTAMP`)
+    .run(input.id, input.name, input.kind, input.url, input.projectPath ?? null, `auto-discovered,public,${input.source ?? "manifest"}`);
+  db.prepare("INSERT OR IGNORE INTO common_crawl_targets (property_id, hostname) VALUES (?, ?)").run(input.id, new URL(input.url).hostname.toLowerCase());
   return getProperty(input.id);
 }
 
@@ -499,20 +562,22 @@ export function recordHit(payload: CollectPayload, request: Request) {
   const visitorHash = new Bun.CryptoHasher("sha256").update(visitorSeed).digest("hex").slice(0, 24);
   if (rateLimited(visitorHash)) return { ok: true, status: 202, dropped: "rate-limited" };
 
-  db.prepare(`
-    INSERT INTO pageviews (id, property_id, path, title, url, referrer, user_agent, screen, language, timezone, visitor_hash,
-      session_id, duration_ms, utm_source, utm_medium, utm_campaign, utm_content, utm_term)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id("pv"), property.id, payload.path || "/", payload.title ?? null, payload.url ?? null, payload.referrer ?? null, userAgent, payload.screen ?? null, payload.language ?? null, payload.timezone ?? null, visitorHash,
-    payload.sessionId?.slice(0, 80) ?? null, payload.durationMs ?? null, payload.campaign?.source ?? null, payload.campaign?.medium ?? null, payload.campaign?.campaign ?? null, payload.campaign?.content ?? null, payload.campaign?.term ?? null);
+  if (!payload.event) {
+    db.prepare(`
+      INSERT INTO pageviews (id, property_id, path, title, url, referrer, user_agent, screen, language, timezone, visitor_hash,
+        session_id, duration_ms, utm_source, utm_medium, utm_campaign, utm_content, utm_term)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id("pv"), property.id, payload.path || "/", payload.title ?? null, payload.url ?? null, payload.referrer ?? null, userAgent, payload.screen ?? null, payload.language ?? null, payload.timezone ?? null, visitorHash,
+      payload.sessionId?.slice(0, 80) ?? null, payload.durationMs ?? null, payload.campaign?.source ?? null, payload.campaign?.medium ?? null, payload.campaign?.campaign ?? null, payload.campaign?.content ?? null, payload.campaign?.term ?? null);
+  }
 
-  db.prepare("UPDATE properties SET status = 'tracked', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(property.id);
+  db.prepare("UPDATE properties SET status = 'tracked', verified_at = COALESCE(verified_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(property.id);
 
   if (payload.event) {
     db.prepare(`
-      INSERT INTO events (id, property_id, name, path, payload)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(id("ev"), property.id, payload.event.slice(0, 50), payload.path || "/", JSON.stringify(payload.data ?? {}));
+      INSERT INTO events (id, property_id, name, path, payload, session_id)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(id("ev"), property.id, payload.event.slice(0, 50), payload.path || "/", JSON.stringify(payload.data ?? {}), payload.sessionId?.slice(0, 80) ?? null);
 
     if (payload.event === "web-vital") {
       const metric = typeof payload.data?.metric === "string" ? payload.data.metric.slice(0, 20) : "unknown";
@@ -573,6 +638,16 @@ export function getDashboard(requestedDays = 30) {
     WHERE date >= date('now', '-30 days')
   `).get() as { clicks: number; impressions: number; ctr: number; position: number | null };
 
+  const ahrefs = db.query(`
+    SELECT
+      COALESCE(SUM(referring_domains), 0) AS referringDomains,
+      COALESCE(SUM(backlinks), 0) AS backlinks,
+      COALESCE(SUM(organic_keywords), 0) AS organicKeywords,
+      COALESCE(SUM(organic_traffic), 0) AS organicTraffic
+    FROM ahrefs_metrics
+    WHERE captured_at >= datetime('now', '-30 days')
+  `).get() as { referringDomains: number; backlinks: number; organicKeywords: number; organicTraffic: number };
+
   const trend = db.query(`
     WITH days(day) AS (
       SELECT date('now', ?)
@@ -608,6 +683,16 @@ export function getDashboard(requestedDays = 30) {
     ORDER BY clicks DESC, impressions DESC
     LIMIT 8
   `).all();
+
+  const rankVisibility = db.query(`SELECT current.property_id AS propertyId, current.keyword,
+      current.observed_position AS observedPosition, current.observed_url AS observedUrl,
+      current.engine, current.checked_at AS checkedAt
+    FROM rank_checks current
+    WHERE current.id = (SELECT latest.id FROM rank_checks latest
+      WHERE latest.property_id=current.property_id AND latest.keyword=current.keyword
+      ORDER BY latest.checked_at DESC LIMIT 1)
+    ORDER BY CASE WHEN current.observed_position IS NULL THEN 1 ELSE 0 END, current.observed_position, current.keyword
+    LIMIT 30`).all();
 
   const crawlSummary = db.query(`
     WITH latest_pages AS (
@@ -871,6 +956,13 @@ export function getDashboard(requestedDays = 30) {
     WHERE observed_position IS NOT NULL
   `).get() as { keywords: number };
 
+  const domainRatings = db.query(`
+    SELECT property_id AS propertyId, domain_rating AS domainRating, MAX(captured_at) AS capturedAt
+    FROM ahrefs_metrics
+    WHERE domain_rating IS NOT NULL
+    GROUP BY property_id
+  `).all() as Array<{ propertyId: string; domainRating: number; capturedAt: string }>;
+
   const authorityScores = db.query(`
     SELECT snapshot.property_id AS propertyId, snapshot.release_id AS releaseId,
       snapshot.authority_score AS authorityScore, snapshot.referring_hosts AS referringHosts,
@@ -924,6 +1016,7 @@ export function getDashboard(requestedDays = 30) {
       backlinks: { kind: "independent", label: "First-party + Common Crawl" },
       authority: { kind: "independent", label: "Zo Authority · Common Crawl" },
     },
+    domainRatings,
     authorityScores: authorityScores.map((row) => ({ ...row, targetHosts: JSON.parse(row.targetHosts) as string[], indexedTargetHosts: JSON.parse(row.indexedTargetHosts) as string[] })),
     commonCrawlLinks,
     properties,
@@ -953,6 +1046,7 @@ export function getDashboard(requestedDays = 30) {
     trend,
     topPages,
     searchPages,
+    rankVisibility,
     latestCrawledPages,
     seoFindings,
     keywordCandidates,

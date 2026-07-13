@@ -14,6 +14,13 @@ It starts with an empty SQLite database. No domains, traffic, identifiers, or ac
 
 No paid analytics or SEO API is required.
 
+## Product workflow
+
+- Guided setup discovers public surfaces, verifies tracker HTML without generating synthetic visits, runs a baseline crawl, and confirms goals.
+- The Action Center orders evidence-backed recommendations by impact, confidence, and effort.
+- Unified page detail combines traffic, events, p75 field performance, technical findings, observed rankings, links, changes, and errors.
+- Goals, ordered funnels, stored weekly briefs, and CSV exports are managed from the private dashboard.
+
 ## Public-only discovery
 
 Run `bun run discover` after a Zo agent writes `data/discovery-manifest.json`. The importer requires `public: true`, HTTPS, HTTP mode, and an unauthenticated 2xx/3xx response. It rejects private Zo URLs, local networks, TCP/process services, private routes, and unpublished previews.
@@ -29,7 +36,11 @@ bun run discover
 bun run crawl -- --max-pages 20
 bun run intelligence all
 bun run common-crawl-sync --metadata-only
+bun run doctor
+bun run backup
 ```
+
+The installer update workflow runs a backup before replacing application source and preserves `data/`, `.env`, and `zosite.json`.
 
 ## Tracker
 

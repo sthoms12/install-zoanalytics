@@ -1,0 +1,197 @@
+import { db, getProperties, getProperty, APP_VERSION } from "./db";
+
+type FunnelStep = { type: "page" | "event"; value: string };
+
+function stableKey(parts: Array<string | number | null | undefined>) {
+  return parts.filter(Boolean).join(":").toLowerCase().replace(/[^a-z0-9:_-]+/g, "-").slice(0, 240);
+}
+
+function percentile(values: number[], target = .75) {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * target) - 1)];
+}
+
+export function getSetupStatus() {
+  const properties = getProperties().filter((item) => item.url.startsWith("http"));
+  const counts = db.query(`SELECT
+      COUNT(*) AS total,
+      COALESCE(SUM(CASE WHEN verified_at IS NOT NULL OR status='tracked' THEN 1 ELSE 0 END), 0) AS verified,
+      COALESCE(SUM(CASE WHEN lifecycle='active' THEN 1 ELSE 0 END), 0) AS active
+    FROM properties WHERE url LIKE 'http%'`).get() as { total: number; verified: number; active: number };
+  const crawled = db.query("SELECT COUNT(DISTINCT property_id) AS count FROM crawl_runs WHERE status='completed'").get() as { count: number };
+  const goals = db.query("SELECT COUNT(*) AS count FROM goals WHERE active=1").get() as { count: number };
+  const latestDiscovery = db.query("SELECT MAX(last_discovered_at) AS at FROM properties").get() as { at: string | null };
+  const steps = [
+    { id: "discover", label: "Discover public surfaces", complete: counts.total > 0, detail: `${counts.total} public ${counts.total === 1 ? "surface" : "surfaces"}` },
+    { id: "verify", label: "Verify tracker coverage", complete: counts.total > 0 && counts.verified === counts.total, detail: `${counts.verified} of ${counts.total} verified` },
+    { id: "audit", label: "Run a baseline audit", complete: counts.total > 0 && crawled.count >= counts.total, detail: `${crawled.count} of ${counts.total} audited` },
+    { id: "goals", label: "Choose meaningful outcomes", complete: goals.count > 0, detail: `${goals.count} active ${goals.count === 1 ? "goal" : "goals"}` },
+  ];
+  return {
+    appVersion: APP_VERSION,
+    complete: steps.every((step) => step.complete),
+    completedSteps: steps.filter((step) => step.complete).length,
+    steps,
+    properties,
+    latestDiscovery: latestDiscovery.at,
+  };
+}
+
+export async function verifyTracker(propertyId: string, collectorOrigin: string) {
+  const property = getProperty(propertyId);
+  if (!property?.url.startsWith("http")) return { ok: false, reason: "Property does not have a public URL" };
+  try {
+    const response = await fetch(property.url, { redirect: "follow", signal: AbortSignal.timeout(12_000), headers: { "User-Agent": "ZoAnalytics tracker verifier" } });
+    const html = await response.text();
+    const sitePattern = new RegExp(`data-site(?:-id)?=["']${propertyId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']`, "i");
+    const originHost = collectorOrigin ? new URL(collectorOrigin).hostname : "";
+    const installed = response.ok && /zowa\.js/i.test(html) && sitePattern.test(html) && (!originHost || html.includes(originHost));
+    if (installed) db.prepare("UPDATE properties SET status='tracked', verified_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=?").run(propertyId);
+    else db.prepare("UPDATE properties SET status=CASE WHEN status='tracked' THEN status ELSE 'missing-tracker' END, updated_at=CURRENT_TIMESTAMP WHERE id=?").run(propertyId);
+    return { ok: installed, status: response.status, finalUrl: response.url, reason: installed ? null : "Tracker snippet was not found in the public HTML" };
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : "Verification failed" };
+  }
+}
+
+function actionState(actionKey: string) {
+  return db.query("SELECT status, snoozed_until AS snoozedUntil, note FROM action_states WHERE action_key=?").get(actionKey) as { status: string; snoozedUntil: string | null; note: string | null } | null;
+}
+
+export function getActionCenter() {
+  const actions: Array<Record<string, unknown>> = [];
+  for (const property of getProperties().filter((item) => item.url.startsWith("http"))) {
+    if (property.status !== "tracked") actions.push({
+      key: stableKey(["tracker", property.id]), propertyId: property.id, pageUrl: property.url, category: "tracking", severity: "critical",
+      title: `Verify analytics on ${property.name}`, why: "Unverified tracking creates blind spots in every traffic and conversion report.",
+      evidence: `Current tracker state: ${property.status.replaceAll("-", " ")}.`, fix: "Install the generated snippet, then run tracker verification.", impact: 5, confidence: 5, effort: 1,
+    });
+  }
+  const findings = db.query(`SELECT property_id AS propertyId, page_url AS pageUrl, severity, code, message, MAX(created_at) AS createdAt
+    FROM seo_findings GROUP BY property_id, page_url, code ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END, createdAt DESC LIMIT 80`).all() as Array<Record<string, string>>;
+  const fixes: Record<string, string> = {
+    missing_title: "Add a concise, unique title that describes the page.", missing_description: "Add a specific meta description that explains the page value.",
+    missing_h1: "Add one descriptive H1 to the main page content.", missing_canonical: "Add a self-referencing canonical URL.", noindex: "Remove noindex if this page should appear in search.",
+    bad_status: "Restore the page or redirect it to the most relevant active URL.", thin_content: "Expand or consolidate the page so it answers the visitor's intent.",
+    missing_alt: "Add useful alternative text to meaningful images.", slow_response: "Inspect server work and large dependencies before the response completes.",
+  };
+  for (const item of findings) actions.push({
+    key: stableKey(["seo", item.propertyId, item.code, item.pageUrl]), propertyId: item.propertyId, pageUrl: item.pageUrl, category: "site audit", severity: item.severity,
+    title: item.message, why: item.severity === "critical" ? "This can prevent discovery or a reliable visit." : "Resolving this improves clarity, accessibility, or search presentation.",
+    evidence: `${item.code.replaceAll("_", " ")} detected during the latest crawl.`, fix: fixes[item.code] ?? "Review the affected page and rerun the audit after correcting it.",
+    impact: item.severity === "critical" ? 5 : item.severity === "warning" ? 3 : 2, confidence: 5, effort: ["missing_title", "missing_description", "missing_h1", "missing_canonical", "missing_alt"].includes(item.code) ? 1 : 3,
+  });
+  const errors = db.query(`SELECT property_id AS propertyId, path, message, COUNT(*) AS occurrences FROM client_errors
+    WHERE created_at >= datetime('now','-7 days') GROUP BY property_id, path, message HAVING COUNT(*) >= 3 ORDER BY occurrences DESC LIMIT 20`).all() as Array<Record<string, string | number>>;
+  for (const item of errors) actions.push({
+    key: stableKey(["error", String(item.propertyId), String(item.path), String(item.message)]), propertyId: item.propertyId, pageUrl: item.path, category: "reliability", severity: "warning",
+    title: "Repeated browser error", why: "Repeated client errors can block an action even when the page still loads.", evidence: `${item.occurrences} occurrences in the last 7 days: ${item.message}`,
+    fix: "Reproduce the affected path, inspect the browser error, deploy the correction, then verify this action.", impact: 4, confidence: 4, effort: 3,
+  });
+  return actions.map((item) => {
+    const key = String(item.key); const state = actionState(key);
+    const priority = Number(item.impact) * Number(item.confidence) * 4 - Number(item.effort) * 3;
+    return { ...item, priority, state: state?.status ?? "open", snoozedUntil: state?.snoozedUntil ?? null, note: state?.note ?? null };
+  }).filter((item) => item.state === "open" && (!item.snoozedUntil || new Date(item.snoozedUntil) <= new Date())).sort((a, b) => b.priority - a.priority);
+}
+
+export function setActionState(actionKey: string, status: "open" | "dismissed" | "resolved", snoozedUntil?: string, note?: string) {
+  const effectiveStatus = snoozedUntil ? "open" : status;
+  db.prepare(`INSERT INTO action_states (action_key, status, snoozed_until, note) VALUES (?, ?, ?, ?)
+    ON CONFLICT(action_key) DO UPDATE SET status=excluded.status, snoozed_until=excluded.snoozed_until, note=excluded.note, updated_at=CURRENT_TIMESTAMP`)
+    .run(actionKey, effectiveStatus, snoozedUntil ?? null, note?.slice(0, 500) ?? null);
+  return { ok: true };
+}
+
+export function getPageDetail(propertyId: string, path: string) {
+  const property = getProperty(propertyId);
+  if (!property) return null;
+  const page = db.query(`SELECT property_id AS propertyId, url, path, status_code AS statusCode, title, description, h1, canonical, robots,
+      word_count AS wordCount, internal_links AS internalLinks, external_links AS externalLinks, images_missing_alt AS imagesMissingAlt,
+      schema_types AS schemaTypes, html_bytes AS htmlBytes, load_ms AS loadMs, seo_score AS seoScore, captured_at AS capturedAt
+    FROM crawled_pages WHERE property_id=? AND path=? ORDER BY captured_at DESC LIMIT 1`).get(propertyId, path);
+  const traffic = db.query(`SELECT COUNT(*) AS pageviews, COUNT(DISTINCT visitor_hash) AS visitors, COUNT(DISTINCT session_id) AS sessions,
+      MIN(created_at) AS firstSeenAt, MAX(created_at) AS lastSeenAt FROM pageviews WHERE property_id=? AND path=? AND created_at>=datetime('now','-30 days')`).get(propertyId, path);
+  const referrals = db.query(`SELECT referrer, COUNT(*) AS visits FROM pageviews WHERE property_id=? AND path=? AND referrer IS NOT NULL AND referrer!=''
+    GROUP BY referrer ORDER BY visits DESC LIMIT 10`).all(propertyId, path);
+  const events = db.query(`SELECT name, COUNT(*) AS count FROM events WHERE property_id=? AND path=? AND created_at>=datetime('now','-30 days') GROUP BY name ORDER BY count DESC`).all(propertyId, path);
+  const metricRows = db.query(`SELECT metric, value, rating FROM performance_metrics WHERE property_id=? AND path=? AND created_at>=datetime('now','-30 days')`).all(propertyId, path) as Array<{ metric: string; value: number; rating: string }>;
+  const vitals = [...new Set(metricRows.map((row) => row.metric))].map((metric) => {
+    const rows = metricRows.filter((row) => row.metric === metric); return { metric, p75: percentile(rows.map((row) => row.value)), samples: rows.length, poorSamples: rows.filter((row) => row.rating === "poor").length };
+  });
+  const findings = db.query("SELECT severity, code, message, created_at AS createdAt FROM seo_findings WHERE property_id=? AND page_url LIKE ? ORDER BY created_at DESC LIMIT 30").all(propertyId, `%${path}`);
+  const changes = db.query("SELECT field, previous_value AS previousValue, current_value AS currentValue, detected_at AS detectedAt FROM page_changes WHERE property_id=? AND page_url LIKE ? ORDER BY detected_at DESC LIMIT 20").all(propertyId, `%${path}`);
+  const errors = db.query("SELECT kind, message, source, COUNT(*) AS occurrences, MAX(created_at) AS lastSeenAt FROM client_errors WHERE property_id=? AND path=? GROUP BY kind,message,source ORDER BY occurrences DESC LIMIT 20").all(propertyId, path);
+  const ranks = db.query(`SELECT keyword, observed_position AS observedPosition, observed_url AS observedUrl, checked_at AS checkedAt FROM rank_checks
+    WHERE property_id=? AND (target_url LIKE ? OR observed_url LIKE ?) ORDER BY checked_at DESC LIMIT 20`).all(propertyId, `%${path}%`, `%${path}%`);
+  const links = db.query("SELECT source_url AS sourceUrl, target_url AS targetUrl, external FROM link_edges WHERE property_id=? AND (source_url LIKE ? OR target_url LIKE ?) ORDER BY created_at DESC LIMIT 50").all(propertyId, `%${path}%`, `%${path}%`);
+  return { property, path, page, traffic, referrals, events, vitals, findings, changes, errors, ranks, links };
+}
+
+export function listFunnels() {
+  const funnels = db.query("SELECT id, property_id AS propertyId, name, window_minutes AS windowMinutes, active, created_at AS createdAt FROM funnels WHERE active=1 ORDER BY created_at DESC").all() as Array<Record<string, string | number>>;
+  return funnels.map((funnel) => {
+    const steps = db.query("SELECT step_type AS type, value FROM funnel_steps WHERE funnel_id=? ORDER BY position").all(funnel.id) as FunnelStep[];
+    return { ...funnel, steps, results: calculateFunnel(String(funnel.propertyId), steps, Number(funnel.windowMinutes)) };
+  });
+}
+
+export function createFunnel(input: { propertyId: string; name: string; windowMinutes?: number; steps: FunnelStep[] }) {
+  if (!getProperty(input.propertyId)) throw new Error("Unknown property");
+  if (!Array.isArray(input.steps) || input.steps.length < 2 || input.steps.length > 8) throw new Error("Funnels require 2 to 8 steps");
+  const funnelId = `funnel_${crypto.randomUUID()}`;
+  const transaction = db.transaction(() => {
+    db.prepare("INSERT INTO funnels (id, property_id, name, window_minutes) VALUES (?, ?, ?, ?)").run(funnelId, input.propertyId, input.name.slice(0, 100), Math.max(1, Math.min(1440, input.windowMinutes ?? 60)));
+    const insert = db.prepare("INSERT INTO funnel_steps (id, funnel_id, position, step_type, value) VALUES (?, ?, ?, ?, ?)");
+    input.steps.forEach((step, index) => insert.run(`step_${crypto.randomUUID()}`, funnelId, index, step.type, step.value.slice(0, 300)));
+  });
+  transaction();
+  return { id: funnelId };
+}
+
+function calculateFunnel(propertyId: string, steps: FunnelStep[], windowMinutes: number) {
+  const rows = db.query(`SELECT session_id AS sessionId, created_at AS at, 'page' AS type, path AS value FROM pageviews
+      WHERE property_id=? AND session_id IS NOT NULL AND created_at>=datetime('now','-30 days')
+    UNION ALL SELECT session_id, created_at, 'event', name FROM events
+      WHERE property_id=? AND session_id IS NOT NULL AND created_at>=datetime('now','-30 days') ORDER BY sessionId, at`).all(propertyId, propertyId) as Array<{ sessionId: string; at: string; type: string; value: string }>;
+  const sessions = new Map<string, typeof rows>();
+  for (const row of rows) sessions.set(row.sessionId, [...(sessions.get(row.sessionId) ?? []), row]);
+  const reached = Array(steps.length).fill(0) as number[];
+  for (const events of sessions.values()) {
+    let position = 0; let previousAt = 0;
+    for (const event of events) {
+      const step = steps[position]; if (!step) break;
+      const matches = event.type === step.type && (step.type === "page" ? event.value === step.value || event.value.startsWith(step.value.replace(/\*$/, "")) : event.value === step.value);
+      const at = new Date(event.at.endsWith("Z") ? event.at : `${event.at}Z`).getTime();
+      if (matches && (!previousAt || at - previousAt <= windowMinutes * 60_000)) { reached[position] += 1; position += 1; previousAt = at; }
+    }
+  }
+  return steps.map((step, index) => ({ ...step, sessions: reached[index], conversionFromPrevious: index === 0 ? 1 : reached[index - 1] ? reached[index] / reached[index - 1] : 0 }));
+}
+
+export function getBriefs() {
+  return db.query("SELECT id, period_start AS periodStart, period_end AS periodEnd, payload, created_at AS createdAt FROM report_snapshots ORDER BY created_at DESC LIMIT 12").all().map((row) => {
+    const item = row as Record<string, unknown>; return { ...item, payload: JSON.parse(String(item.payload)) };
+  });
+}
+
+export function exportRows(dataset: string) {
+  const queries: Record<string, string> = {
+    properties: "SELECT id,name,kind,url,status,lifecycle,verified_at,last_discovered_at FROM properties ORDER BY name",
+    pageviews: "SELECT property_id,path,title,url,referrer,screen,language,timezone,session_id,utm_source,utm_medium,utm_campaign,created_at FROM pageviews ORDER BY created_at DESC",
+    events: "SELECT property_id,name,path,session_id,payload,created_at FROM events ORDER BY created_at DESC",
+    pages: "SELECT property_id,url,path,status_code,title,description,h1,canonical,robots,word_count,seo_score,captured_at FROM crawled_pages ORDER BY captured_at DESC",
+    findings: "SELECT property_id,page_url,severity,code,message,created_at FROM seo_findings ORDER BY created_at DESC",
+    backlinks: "SELECT property_id,source_url,target_url,first_seen_at,last_seen_at,status,visits FROM discovered_backlinks ORDER BY last_seen_at DESC",
+  };
+  if (!queries[dataset]) return null;
+  return db.query(queries[dataset]).all() as Array<Record<string, unknown>>;
+}
+
+export function rowsToCsv(rows: Array<Record<string, unknown>>) {
+  if (!rows.length) return "";
+  const keys = Object.keys(rows[0]);
+  const cell = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+  return [keys.map(cell).join(","), ...rows.map((row) => keys.map((key) => cell(row[key])).join(","))].join("\n");
+}

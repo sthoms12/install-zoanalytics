@@ -71,3 +71,13 @@ Confirm:
 - A browser event for an accepted property is stored while bots and automated browsers are dropped.
 
 Run `/root/.codex/skills/.system/skill-creator/scripts/quick_validate.py` against this skill when modifying its packaging.
+
+## Update
+
+Run:
+
+```bash
+bun run scripts/update.ts --target /home/workspace/zoanalytics
+```
+
+The updater requires an existing database, runs the installed app's backup command first, replaces application source from the bundled release, preserves `data/`, `.env`, and `zosite.json`, installs the locked dependencies, and requires a successful production build before completion. Run `bun run doctor` in the installed app after updating.

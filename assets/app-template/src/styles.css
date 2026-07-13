@@ -102,6 +102,8 @@ html { scroll-behavior: smooth; }
     background-size: auto, 56px 56px, 56px 56px;
     mask-image: linear-gradient(to bottom, black, transparent 72%);
   }
+  .za-scrollbar-none { scrollbar-width: none; }
+  .za-scrollbar-none::-webkit-scrollbar { display: none; }
   .za-panel {
     border: 1px solid rgba(255,255,255,.075);
     border-radius: .75rem;
@@ -124,8 +126,21 @@ html { scroll-behavior: smooth; }
   }
   .za-primary-button:hover { background: #76e8cd; transform: translateY(-1px); box-shadow: 0 8px 24px rgba(88,224,192,.14); }
   .za-primary-button:active, .za-icon-button:active { transform: translateY(1px) scale(.98); }
-  .za-primary-button:focus-visible, .za-icon-button:focus-visible { outline: 2px solid rgba(88,224,192,.65); outline-offset: 2px; }
-  .za-primary-button:disabled, .za-icon-button:disabled { opacity: .55; cursor: wait; }
+  .za-secondary-button {
+    display: inline-flex; min-height: 2.5rem; align-items: center; justify-content: center; gap: .4rem;
+    border: 1px solid rgba(255,255,255,.11); border-radius: .5rem; background: rgba(255,255,255,.035); padding: .55rem .8rem;
+    color: #aebbb7; font-size: .7rem; font-weight: 650; transition: 180ms ease;
+  }
+  .za-secondary-button:hover { border-color: rgba(88,224,192,.35); color: #70d9b9; background: rgba(88,224,192,.04); transform: translateY(-1px); }
+  .za-text-button { display: inline-flex; min-height: 2.5rem; align-items: center; padding: 0 .65rem; color: #71817c; font-size: .7rem; font-weight: 650; transition: 180ms ease; }
+  .za-text-button:hover { color: #dce6e3; }
+  .za-input {
+    min-height: 2.5rem; width: 100%; border: 1px solid rgba(255,255,255,.1); border-radius: .5rem;
+    background: rgba(255,255,255,.035); padding: .6rem .75rem; color: #dce6e3; font-size: .75rem; outline: none; transition: 180ms ease;
+  }
+  .za-input:focus { border-color: rgba(88,224,192,.55); box-shadow: 0 0 0 2px rgba(88,224,192,.1); }
+  .za-primary-button:focus-visible, .za-secondary-button:focus-visible, .za-text-button:focus-visible, .za-icon-button:focus-visible { outline: 2px solid rgba(88,224,192,.65); outline-offset: 2px; }
+  .za-primary-button:disabled, .za-secondary-button:disabled, .za-icon-button:disabled { opacity: .55; cursor: wait; }
 }
 
 @media (min-width: 640px) { @layer components { .za-panel { padding: 1.25rem; } } }

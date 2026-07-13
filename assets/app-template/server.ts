@@ -6,6 +6,7 @@ import { Hono } from "hono";
 import { getDashboard, getProperties, recordHit, type CollectPayload } from "./backend-lib/db";
 import { crawlAllPublicProperties, crawlProperty } from "./backend-lib/crawler";
 import { addCompetitor, addRankKeyword, createGoal, createWeeklyReport, discoverProperties, discoverWebBacklinks, getIntelligence, recordRank, runRankChecks } from "./backend-lib/intelligence";
+import { createFunnel, exportRows, getActionCenter, getBriefs, getPageDetail, getSetupStatus, listFunnels, rowsToCsv, setActionState, verifyTracker } from "./backend-lib/product";
 
 type Mode = "development" | "production";
 const app = new Hono();
@@ -21,7 +22,7 @@ const corsHeaders = {
   "Access-Control-Max-Age": "86400",
 };
 
-app.get("/api/health", (c) => c.json({ ok: true, app: "ZoAnalytics" }));
+app.get("/api/health", (c) => c.json({ ok: true, app: "ZoAnalytics", version: getSetupStatus().appVersion }));
 app.use("/api/analytics/*", async (c, next) => {
   if (!collectorOnly) return next();
   if (c.req.path === "/api/analytics/collect") return next();
@@ -32,9 +33,35 @@ app.get("/api/analytics/summary", (c) => {
   const days = Number.parseInt(c.req.query("days") ?? "30", 10);
   return c.json(getDashboard(days));
 });
-const collectorOrigin = process.env.ZOANALYTICS_PUBLIC_ORIGIN ?? "";
+const inferredOwnerHandle = getProperties().map((item) => item.url.match(/^[a-z]+:\/\/[^/]+-([a-z0-9-]+)\.zocomputer\.io/i)?.[1]).find(Boolean);
+const ownerHandle = process.env.ZO_OWNER_HANDLE?.trim() || inferredOwnerHandle;
+const collectorOrigin = process.env.ZOANALYTICS_PUBLIC_ORIGIN
+  ?? (config.publish?.label && ownerHandle ? `https://${config.publish.label}-${ownerHandle}.zocomputer.io` : "");
 app.get("/api/analytics/intelligence", (c) => c.json({ ...getIntelligence(), collectorOrigin }));
+app.get("/api/analytics/setup", (c) => c.json(getSetupStatus()));
+app.get("/api/analytics/actions", (c) => c.json({ actions: getActionCenter() }));
+app.patch("/api/analytics/actions/:key", async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  if (!["open", "dismissed", "resolved"].includes(body.status)) return c.json({ error: "Valid status is required" }, 400);
+  return c.json(setActionState(c.req.param("key"), body.status, body.snoozedUntil, body.note));
+});
+app.get("/api/analytics/pages/:propertyId", (c) => {
+  const detail = getPageDetail(c.req.param("propertyId"), c.req.query("path") ?? "/");
+  return detail ? c.json(detail) : c.json({ error: "Page or property not found" }, 404);
+});
+app.get("/api/analytics/funnels", (c) => c.json({ funnels: listFunnels() }));
+app.post("/api/analytics/funnels", async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  try { return c.json(createFunnel(body), 201); } catch (error) { return c.json({ error: error instanceof Error ? error.message : "Invalid funnel" }, 400); }
+});
+app.get("/api/analytics/briefs", (c) => c.json({ briefs: getBriefs() }));
+app.get("/api/analytics/export/:dataset", (c) => {
+  const dataset = c.req.param("dataset").replace(/\.csv$/i, ""); const rows = exportRows(dataset);
+  if (!rows) return c.json({ error: "Unknown export dataset" }, 404);
+  return new Response(rowsToCsv(rows), { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="zoanalytics-${dataset}.csv"` } });
+});
 app.post("/api/analytics/discover", async (c) => c.json(await discoverProperties()));
+app.post("/api/analytics/verify/:propertyId", async (c) => c.json(await verifyTracker(c.req.param("propertyId"), collectorOrigin)));
 app.post("/api/analytics/goals", async (c) => {
   const body = await c.req.json().catch(() => ({}));
   if (typeof body.propertyId !== "string" || typeof body.name !== "string" || typeof body.eventName !== "string") return c.json({ error: "propertyId, name, and eventName are required" }, 400);
@@ -153,11 +180,14 @@ app.get("/zowa.js", (c) => {
   pageview();
 
   let cls = 0;
+  let inp = 0;
   try {
     new PerformanceObserver((list) => { for (const entry of list.getEntries()) if (!entry.hadRecentInput) cls += entry.value; })
       .observe({ type: "layout-shift", buffered: true });
     new PerformanceObserver((list) => { const entries = list.getEntries(); const last = entries[entries.length - 1]; if (last) send({ event: "web-vital", data: { metric: "LCP", value: Math.round(last.startTime), rating: last.startTime <= 2500 ? "good" : last.startTime <= 4000 ? "needs-improvement" : "poor" } }); })
       .observe({ type: "largest-contentful-paint", buffered: true });
+    new PerformanceObserver((list) => { for (const entry of list.getEntries()) if (entry.interactionId && entry.duration > inp) inp = entry.duration; })
+      .observe({ type: "event", buffered: true, durationThreshold: 40 });
   } catch {}
   addEventListener("load", () => setTimeout(() => {
     const nav = performance.getEntriesByType("navigation")[0];
@@ -165,6 +195,7 @@ app.get("/zowa.js", (c) => {
   }, 0), { once: true });
   addEventListener("pagehide", () => {
     send({ event: "web-vital", data: { metric: "CLS", value: Math.round(cls * 1000) / 1000, rating: cls <= .1 ? "good" : cls <= .25 ? "needs-improvement" : "poor" } });
+    if (inp > 0) send({ event: "web-vital", data: { metric: "INP", value: Math.round(inp), rating: inp <= 200 ? "good" : inp <= 500 ? "needs-improvement" : "poor" } });
   }, { once: true });
   addEventListener("error", (event) => {
     const target = event.target;
