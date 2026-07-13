@@ -12,7 +12,7 @@ db.exec("PRAGMA foreign_keys = ON;");
 export type Property = {
   id: string;
   name: string;
-  kind: "space" | "site" | "service";
+  kind: "space" | "site" | "service" | "external";
   url: string;
   projectPath: string | null;
   status: "tracked" | "missing-tracker" | "needs-review";
@@ -24,7 +24,7 @@ export type Property = {
 export type DiscoveredProperty = {
   id: string;
   name: string;
-  kind: "space" | "site" | "service";
+  kind: "space" | "site" | "service" | "external";
   url: string;
   projectPath?: string | null;
   source?: string;
@@ -53,7 +53,7 @@ export type CollectPayload = {
   campaign?: { source?: string; medium?: string; campaign?: string; content?: string; term?: string };
 };
 
-export const APP_VERSION = "0.2.0";
+export const APP_VERSION = "0.3.0";
 
 export type CrawlPageInput = {
   propertyId: string;
@@ -375,6 +375,17 @@ function migrate() {
       PRIMARY KEY (property_id, url)
     );
 
+    CREATE TABLE IF NOT EXISTS property_sources (
+      property_id TEXT NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
+      provider TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      repository TEXT,
+      repository_url TEXT,
+      metadata TEXT NOT NULL DEFAULT '{}',
+      last_synced_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (property_id, provider)
+    );
+
     CREATE TABLE IF NOT EXISTS common_crawl_targets (
       property_id TEXT NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
       hostname TEXT NOT NULL,
@@ -434,7 +445,7 @@ function migrate() {
   ensureColumn("properties", "lifecycle", "TEXT NOT NULL DEFAULT 'active'");
   ensureColumn("properties", "retired_at", "TEXT");
   db.prepare("UPDATE properties SET lifecycle='retired', retired_at=COALESCE(retired_at, CURRENT_TIMESTAMP) WHERE url NOT LIKE 'http%'").run();
-  db.prepare("INSERT OR IGNORE INTO schema_migrations (version) VALUES (2)").run();
+  db.prepare("INSERT OR IGNORE INTO schema_migrations (version) VALUES (3)").run();
   db.prepare("INSERT INTO app_settings (key, value) VALUES ('app_version', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP").run(APP_VERSION);
 }
 
@@ -487,6 +498,33 @@ export function upsertDiscoveredProperty(input: DiscoveredProperty) {
     .run(input.id, input.name, input.kind, input.url, input.projectPath ?? null, `auto-discovered,public,${input.source ?? "manifest"}`);
   db.prepare("INSERT OR IGNORE INTO common_crawl_targets (property_id, hostname) VALUES (?, ?)").run(input.id, new URL(input.url).hostname.toLowerCase());
   return getProperty(input.id);
+}
+
+export function upsertPropertySource(input: { propertyId: string; provider: string; sourceId: string; repository?: string | null; repositoryUrl?: string | null; metadata?: Record<string, unknown> }) {
+  db.prepare(`INSERT INTO property_sources (property_id, provider, source_id, repository, repository_url, metadata)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(property_id, provider) DO UPDATE SET source_id=excluded.source_id,
+      repository=COALESCE(excluded.repository, property_sources.repository),
+      repository_url=COALESCE(excluded.repository_url, property_sources.repository_url),
+      metadata=excluded.metadata, last_synced_at=CURRENT_TIMESTAMP`)
+    .run(input.propertyId, input.provider, input.sourceId, input.repository ?? null, input.repositoryUrl ?? null, JSON.stringify(input.metadata ?? {}));
+}
+
+export function upsertSurfaceAlias(propertyId: string, url: string) {
+  db.prepare(`INSERT INTO surface_aliases (property_id, url) VALUES (?, ?)
+    ON CONFLICT(property_id, url) DO UPDATE SET active=1, last_seen_at=CURRENT_TIMESTAMP`).run(propertyId, url);
+  try {
+    db.prepare("INSERT OR IGNORE INTO common_crawl_targets (property_id, hostname) VALUES (?, ?)").run(propertyId, new URL(url).hostname.toLowerCase());
+  } catch {}
+}
+
+export function getPropertySources() {
+  return db.query(`SELECT property_id AS propertyId, provider, source_id AS sourceId, repository,
+      repository_url AS repositoryUrl, metadata, last_synced_at AS lastSyncedAt
+    FROM property_sources ORDER BY provider, repository, source_id`).all().map((row: any) => ({
+      ...row,
+      metadata: JSON.parse(row.metadata || "{}"),
+    }));
 }
 
 export function getCommonCrawlTargets() {

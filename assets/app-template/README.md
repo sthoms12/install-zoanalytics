@@ -1,6 +1,6 @@
 # ZoAnalytics
 
-ZoAnalytics is a private analytics command center for public Zo Space routes, published Zo Sites, and public HTTP services.
+ZoAnalytics is a private analytics command center for public Zo Space routes, published Zo Sites, public HTTP services, and external sites deployed through Cloudflare and GitHub.
 
 It starts with an empty SQLite database. No domains, traffic, identifiers, or account-specific data are bundled.
 
@@ -27,12 +27,15 @@ Run `bun run discover` after a Zo agent writes `data/discovery-manifest.json`. T
 
 The local fallback scanner can discover public published Sites when `ZO_OWNER_HANDLE` is configured.
 
+When Cloudflare and GitHub are connected, `bun run external-discovery` imports enabled production Cloudflare Pages/Workers domains, confirms anonymous reachability, and matches source repositories without modifying them. Any public HTTPS site can also be added manually from the dashboard.
+
 ## Commands
 
 ```bash
 bun run build
 bun run dev
 bun run discover
+bun run external-discovery
 bun run crawl -- --max-pages 20
 bun run intelligence all
 bun run common-crawl-sync --metadata-only

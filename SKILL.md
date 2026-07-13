@@ -1,6 +1,6 @@
 ---
 name: install-zoanalytics
-description: Install, configure, update, or audit a fresh ZoAnalytics instance for a Zo Computer account. Use when a user wants private first-party analytics and independent SEO intelligence for public Zo Space routes, published Zo Sites, or public HTTP services, including recurring public-surface discovery. Never copy another user's data or include private Zo surfaces.
+description: Install, configure, update, or audit a fresh ZoAnalytics instance for a Zo Computer account. Use when a user wants private first-party analytics and independent SEO intelligence for public Zo Space routes, published Zo Sites, public HTTP services, or external Cloudflare/GitHub sites, including recurring public-surface discovery. Never copy another user's data or include private surfaces.
 ---
 
 # Install ZoAnalytics
@@ -11,7 +11,7 @@ Install the bundled app template into a new workspace folder and configure publi
 
 - Never copy an existing `data/` directory, SQLite database, `.env`, credentials, domains, handles, traffic, or cached crawl data.
 - Never overwrite a non-empty target directory.
-- Include only public Space page routes, published public Sites, and public HTTP services.
+- Include only public Space page routes, published public Sites, public HTTP services, and anonymously reachable production external sites.
 - Exclude private routes/sites/services, `*.zo.computer`, TCP/process services, unpublished previews, localhost/private networks, and ZoAnalytics itself.
 - Keep the dashboard private. Publish only the collector surface unless the user explicitly chooses another authenticated deployment.
 
@@ -46,6 +46,8 @@ bun run discover
 
 Review both `discovered` and `skipped` in `data/discovery-status.json`. Treat `not-publicly-reachable` as excluded, not as an error to bypass.
 
+If Cloudflare and GitHub are connected, run `bun run external-discovery`. This imports enabled production Cloudflare Pages/Workers domains and attaches a matching GitHub repository when one can be identified. A missing connector must remain a clean optional state. Never bundle or infer another account's Cloudflare account ID or GitHub owner.
+
 For each accepted surface, install the generated tracker snippet only when the source can be edited safely. Otherwise show the snippet to the user. Never alter private surfaces.
 
 ## Schedule
@@ -59,6 +61,7 @@ Run:
 ```bash
 bun run build
 bun run discover
+bun run external-discovery
 bun run crawl -- --max-pages 5
 ```
 

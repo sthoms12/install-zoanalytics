@@ -1,5 +1,5 @@
 import { Glob } from "bun";
-import { db, getProperties, upsertDiscoveredProperty } from "./db";
+import { db, getProperties, upsertDiscoveredProperty, upsertPropertySource, upsertSurfaceAlias } from "./db";
 import { getActionCenter } from "./product";
 
 const WORKSPACE = "/home/workspace";
@@ -7,9 +7,24 @@ const WORKSPACE = "/home/workspace";
 function id(prefix: string) { return `${prefix}_${crypto.randomUUID()}`; }
 function slug(value: string) { return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""); }
 
-export type DiscoverySurface = { id?: string; name: string; kind: "space" | "site" | "service"; url: string; public: boolean; mode?: string; projectPath?: string | null; source?: string };
+export type DiscoverySurface = {
+  id?: string;
+  name: string;
+  kind: "space" | "site" | "service" | "external";
+  url: string;
+  public: boolean;
+  mode?: string;
+  projectPath?: string | null;
+  source?: string;
+  provider?: string;
+  providerId?: string;
+  repository?: string | null;
+  repositoryUrl?: string | null;
+  aliases?: string[];
+  metadata?: Record<string, unknown>;
+};
 
-function publicUrl(value: string) {
+export function publicUrl(value: string) {
   try {
     const url = new URL(value); const host = url.hostname.toLowerCase();
     if (url.protocol !== "https:" || host === "localhost" || host.endsWith(".local") || host.endsWith(".zo.computer")) return null;
@@ -18,9 +33,11 @@ function publicUrl(value: string) {
   } catch { return null; }
 }
 
-async function reachableWithoutAuth(url: URL) {
+export async function reachableWithoutAuth(url: URL) {
   try {
     const response = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(10_000), headers: { "User-Agent": "ZoAnalytics public-surface discovery" } });
+    const finalUrl = new URL(response.url);
+    if (finalUrl.hostname.endsWith(".cloudflareaccess.com") || finalUrl.pathname.startsWith("/cdn-cgi/access/")) return false;
     return response.status >= 200 && response.status < 400;
   } catch { return false; }
 }
@@ -34,8 +51,24 @@ export async function importDiscoveryManifest(surfaces: DiscoverySurface[]) {
     const url = publicUrl(surface.url);
     if (!url) { skipped.push({ name: surface.name, url: surface.url, reason: "invalid-or-private-url" }); continue; }
     if (!await reachableWithoutAuth(url)) { skipped.push({ name: surface.name, url: surface.url, reason: "not-publicly-reachable" }); continue; }
-    const propertyId = slug(surface.id || `${surface.kind}-${url.hostname}${url.pathname === "/" ? "" : `-${url.pathname}`}`);
-    const property = upsertDiscoveredProperty({ id: propertyId, name: surface.name, kind: surface.kind, url: url.toString().replace(/\/$/, ""), projectPath: surface.projectPath ?? null, source: surface.source ?? "zo-inventory" });
+    const normalizedUrl = url.toString().replace(/\/$/, "");
+    const matched = getProperties().find((item) => item.url.replace(/\/$/, "") === normalizedUrl);
+    const propertyId = matched?.id ?? slug(surface.id || `${surface.kind}-${url.hostname}${url.pathname === "/" ? "" : `-${url.pathname}`}`);
+    const previous = getProperties().find((item) => item.id === propertyId);
+    if (previous?.url && previous.url.replace(/\/$/, "") !== normalizedUrl) upsertSurfaceAlias(propertyId, previous.url);
+    const property = upsertDiscoveredProperty({ id: propertyId, name: surface.name, kind: surface.kind, url: normalizedUrl, projectPath: surface.projectPath ?? null, source: surface.source ?? "zo-inventory" });
+    if (surface.provider) upsertPropertySource({
+      propertyId,
+      provider: surface.provider,
+      sourceId: surface.providerId || surface.id || url.hostname,
+      repository: surface.repository,
+      repositoryUrl: surface.repositoryUrl,
+      metadata: surface.metadata,
+    });
+    for (const alias of surface.aliases ?? []) {
+      const aliasUrl = publicUrl(alias);
+      if (aliasUrl) upsertSurfaceAlias(propertyId, aliasUrl.toString().replace(/\/$/, ""));
+    }
     discovered.push({ id: propertyId, name: surface.name, url: property?.url ?? url.toString(), projectPath: property?.projectPath ?? null, status: property?.status ?? "missing-tracker" });
   }
   return { discovered, skipped, total: getProperties().length };

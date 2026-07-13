@@ -2,12 +2,12 @@
 
 ZoAnalytics is private analytics for public Zo web surfaces.
 
-Version `0.2.0` adds guided setup, tracker verification without synthetic traffic, an evidence-backed Action Center, unified page detail, goals, ordered funnels, stored briefs, CSV exports, p75 Core Web Vitals including INP, versioned migrations, backup, and doctor workflows.
+Version `0.3.0` adds account-neutral Cloudflare production discovery, GitHub repository matching, and manual external-site onboarding alongside the existing guided setup, tracker verification, Action Center, page detail, goals, funnels, briefs, exports, Web Vitals, migrations, backup, and doctor workflows.
 
 ## Invariants
 
 - Start with an empty database. Never seed account names, domains, properties, traffic, or credentials.
-- Discover only public Zo Space page routes, published public Sites, and public HTTP services.
+- Discover only public Zo Space page routes, published public Sites, public HTTP services, and anonymously reachable production external sites.
 - Reject private routes and services, `*.zo.computer`, TCP/process services, unpublished previews, localhost, and private networks.
 - Confirm reachability without authentication before storing a discovered surface.
 - Keep the dashboard private and expose only the collector routes publicly.
@@ -19,6 +19,7 @@ Version `0.2.0` adds guided setup, tracker verification without synthetic traffi
 ```bash
 bun run build
 bun run discover
+bun run external-discovery
 bun run crawl -- --max-pages 20
 bun run intelligence all
 bun run common-crawl-sync

@@ -7,6 +7,7 @@ import { getDashboard, getProperties, recordHit, type CollectPayload } from "./b
 import { crawlAllPublicProperties, crawlProperty } from "./backend-lib/crawler";
 import { addCompetitor, addRankKeyword, createGoal, createWeeklyReport, discoverProperties, discoverWebBacklinks, getIntelligence, recordRank, runRankChecks } from "./backend-lib/intelligence";
 import { createFunnel, exportRows, getActionCenter, getBriefs, getPageDetail, getSetupStatus, listFunnels, rowsToCsv, setActionState, verifyTracker } from "./backend-lib/product";
+import { addExternalProperty, discoverExternalProperties, getExternalSources } from "./backend-lib/external";
 
 type Mode = "development" | "production";
 const app = new Hono();
@@ -37,7 +38,7 @@ const inferredOwnerHandle = getProperties().map((item) => item.url.match(/^[a-z]
 const ownerHandle = process.env.ZO_OWNER_HANDLE?.trim() || inferredOwnerHandle;
 const collectorOrigin = process.env.ZOANALYTICS_PUBLIC_ORIGIN
   ?? (config.publish?.label && ownerHandle ? `https://${config.publish.label}-${ownerHandle}.zocomputer.io` : "");
-app.get("/api/analytics/intelligence", (c) => c.json({ ...getIntelligence(), collectorOrigin }));
+app.get("/api/analytics/intelligence", (c) => c.json({ ...getIntelligence(), collectorOrigin, externalSources: getExternalSources() }));
 app.get("/api/analytics/setup", (c) => c.json(getSetupStatus()));
 app.get("/api/analytics/actions", (c) => c.json({ actions: getActionCenter() }));
 app.patch("/api/analytics/actions/:key", async (c) => {
@@ -61,6 +62,12 @@ app.get("/api/analytics/export/:dataset", (c) => {
   return new Response(rowsToCsv(rows), { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="zoanalytics-${dataset}.csv"` } });
 });
 app.post("/api/analytics/discover", async (c) => c.json(await discoverProperties()));
+app.post("/api/analytics/discover/external", async (c) => c.json(await discoverExternalProperties()));
+app.post("/api/analytics/properties/external", async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  try { return c.json(await addExternalProperty(body), 201); }
+  catch (error) { return c.json({ error: error instanceof Error ? error.message : "Could not add external site" }, 400); }
+});
 app.post("/api/analytics/verify/:propertyId", async (c) => c.json(await verifyTracker(c.req.param("propertyId"), collectorOrigin)));
 app.post("/api/analytics/goals", async (c) => {
   const body = await c.req.json().catch(() => ({}));
