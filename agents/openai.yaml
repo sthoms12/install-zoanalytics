@@ -1,0 +1,4 @@
+interface:
+  display_name: "Install ZoAnalytics"
+  short_description: "Install private analytics for public Zo surfaces"
+  default_prompt: "Use $install-zoanalytics to install a fresh ZoAnalytics instance and schedule public-surface discovery."

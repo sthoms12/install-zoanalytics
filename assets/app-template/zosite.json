@@ -1,0 +1,16 @@
+{
+  "name": "zoanalytics",
+  "local_port": 57681,
+  "entrypoint": "bun run dev",
+  "publish": {
+    "label": "zoanalytics",
+    "type": "http",
+    "entrypoint": "bun run prod",
+    "published_port": 57681,
+    "env": {
+      "NODE_ENV": "production",
+      "ZOANALYTICS_COLLECTOR_ONLY": "true",
+      "ZO_CLIENT_IDENTITY_TOKEN": "none"
+    }
+  }
+}
