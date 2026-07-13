@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { IconBolt, IconCheck, IconChevronRight, IconDownload, IconFileAnalytics, IconFlag, IconRoute, IconTargetArrow } from "@tabler/icons-react";
+import { useEffect, useState } from "react";
+import { IconBolt, IconCheck, IconChevronRight, IconDownload, IconExternalLink, IconEye, IconFileAnalytics, IconFlag, IconRefresh, IconRoute, IconShieldLock, IconTargetArrow } from "@tabler/icons-react";
 
 export type SetupData = {
   appVersion: string; complete: boolean; completedSteps: number;
@@ -82,6 +82,94 @@ function PageDetail({ detail }: { detail: any }) {
 
 function Metric({ label, value }: { label: string; value: string | number }) { return <div className="bg-[#0b1113] p-3"><p className="text-xl font-semibold tabular-nums">{value}</p><p className="mt-1 text-[9px] uppercase tracking-wider text-[#61706c]">{label}</p></div>; }
 function SignalList({ title, rows }: { title: string; rows: string[] }) { return <div><p className="text-[10px] font-semibold uppercase tracking-[.12em] text-[#65736f]">{title}</p><div className="mt-2 space-y-1">{rows.slice(0, 5).map((row, index) => <p key={`${row}:${index}`} className="rounded-md bg-white/[.025] px-3 py-2 text-xs text-[#a8b6b1]">{row}</p>)}{!rows.length && <p className="text-xs text-[#53615d]">No observed data yet.</p>}</div></div>; }
+
+type PulseProperty = {
+  propertyId: string; name: string; url: string; enabled: boolean; displayName: string | null;
+  showUrl: boolean; showPageviews: boolean; showVisitors: boolean; showTrend: boolean;
+  showAudit: boolean; showVitals: boolean; showAuthority: boolean; updatedAt: string | null;
+};
+
+const pulseMetrics: Array<{ key: keyof PulseProperty; label: string; detail: string }> = [
+  { key: "showUrl", label: "Public URL", detail: "Link to the live property" },
+  { key: "showPageviews", label: "Pageviews", detail: "30-day aggregate" },
+  { key: "showVisitors", label: "Visitors", detail: "30-day anonymous estimate" },
+  { key: "showTrend", label: "Trend", detail: "30 daily aggregate points" },
+  { key: "showAudit", label: "Audit", detail: "Latest score and page count" },
+  { key: "showVitals", label: "Web Vitals", detail: "p75 with at least 5 samples" },
+  { key: "showAuthority", label: "Zo Authority", detail: "Common Crawl public graph" },
+];
+
+export function PulseSettings() {
+  const [properties, setProperties] = useState<PulseProperty[]>([]);
+  const [publicUrl, setPublicUrl] = useState("");
+  const [busy, setBusy] = useState("");
+  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  async function load() {
+    setLoading(true); setMessage("");
+    try {
+      const response = await fetch("/api/analytics/pulse/config", { headers: { Accept: "application/json" } });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Could not read Pulse settings");
+      setProperties(data.properties ?? []); setPublicUrl(data.publicUrl ?? "");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Could not read Pulse settings"); }
+    finally { setLoading(false); }
+  }
+
+  useEffect(() => { void load(); }, []);
+  function change(propertyId: string, key: keyof PulseProperty, value: string | boolean) {
+    setProperties((items) => items.map((item) => item.propertyId === propertyId ? { ...item, [key]: value } : item));
+  }
+  async function save(property: PulseProperty) {
+    setBusy(property.propertyId); setMessage("");
+    try {
+      const response = await fetch(`/api/analytics/pulse/config/${encodeURIComponent(property.propertyId)}`, { method: "PATCH", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify(property) });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Could not save Pulse settings");
+      setProperties((items) => items.map((item) => item.propertyId === property.propertyId ? data.property : item));
+      setMessage(`${property.name} Pulse settings saved.`);
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Could not save Pulse settings"); }
+    finally { setBusy(""); }
+  }
+  async function refresh() {
+    setBusy("refresh"); setMessage("");
+    try { await post("/api/analytics/pulse/refresh"); setMessage("Public Pulse snapshot refreshed."); }
+    catch (error) { setMessage(error instanceof Error ? error.message : "Could not refresh Pulse"); }
+    finally { setBusy(""); }
+  }
+
+  const enabled = properties.filter((item) => item.enabled).length;
+  return <div className="space-y-4">
+    <section className="grid gap-4 xl:grid-cols-[.8fr_1.2fr]">
+      <div className="za-panel">
+        <div className="flex items-center gap-2 text-[#58e0c0]"><IconEye size={18}/><p className="text-[10px] font-semibold uppercase tracking-[.14em]">Public Pulse</p></div>
+        <h2 className="mt-3 max-w-lg text-3xl font-semibold tracking-[-.05em]">Share proof, not private analytics.</h2>
+        <p className="mt-3 max-w-xl text-sm leading-6 text-[#82928d]">Every property and metric is opt-in. Pulse publishes a sanitized 30-day snapshot and never exposes visitor hashes, sessions, paths, referrers, campaigns, events, errors, or repository details.</p>
+        <div className="mt-6 flex flex-wrap gap-2">
+          <button onClick={() => void refresh()} disabled={Boolean(busy)} className="za-primary-button"><IconRefresh size={15} className={busy === "refresh" ? "animate-spin" : ""}/>Refresh snapshot</button>
+          {publicUrl && <a href={publicUrl} target="_blank" rel="noreferrer" className="za-secondary-button"><IconExternalLink size={15}/>Open public view</a>}
+        </div>
+      </div>
+      <div className="za-panel">
+        <div className="flex items-center gap-2 text-[#58e0c0]"><IconShieldLock size={18}/><p className="text-[10px] font-semibold uppercase tracking-[.14em]">Publication boundary</p></div>
+        <div className="mt-5 grid grid-cols-2 gap-px overflow-hidden rounded-lg bg-white/[.07]"><Metric label="Enabled properties" value={enabled}/><Metric label="Available properties" value={properties.length}/></div>
+        <div className="mt-5 space-y-2 text-xs leading-5 text-[#82928d]"><p>Nothing is public until you enable a property and save it.</p><p>The public service reads only the latest generated snapshot, never the live analytics tables.</p><p>Web Vitals stay hidden until a metric has at least five samples.</p></div>
+      </div>
+    </section>
+    {loading ? <div className="za-panel text-sm text-[#71817c]">Reading Pulse settings...</div> : <section className="space-y-3">{properties.map((property) => <article key={property.propertyId} className={`za-panel transition ${property.enabled ? "border-[#58e0c0]/25" : ""}`}>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0"><div className="flex items-center gap-3"><button type="button" role="switch" aria-checked={property.enabled} aria-label={`Publish ${property.name} in Pulse`} onClick={() => change(property.propertyId, "enabled", !property.enabled)} className={`relative h-6 w-11 rounded-full border transition ${property.enabled ? "border-[#58e0c0] bg-[#58e0c0]" : "border-white/15 bg-white/[.05]"}`}><span className={`absolute top-0.5 size-4 rounded-full bg-[#07110e] transition-transform ${property.enabled ? "translate-x-5" : "translate-x-1"}`}/></button><div><h3 className="text-base font-semibold tracking-[-.025em]">{property.name}</h3><p className="mt-1 truncate text-[10px] text-[#61706c]">{property.url}</p></div></div></div>
+        <button onClick={() => void save(property)} disabled={Boolean(busy)} className="za-primary-button self-start">{busy === property.propertyId ? "Saving" : "Save settings"}</button>
+      </div>
+      <div className={`mt-5 space-y-4 ${property.enabled ? "" : "opacity-55"}`}>
+        <label className="block"><span className="text-[10px] font-semibold uppercase tracking-[.12em] text-[#65736f]">Public display name</span><input value={property.displayName ?? ""} onChange={(event) => change(property.propertyId, "displayName", event.target.value)} placeholder={property.name} className="za-input mt-2 w-full max-w-md"/></label>
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">{pulseMetrics.map((metric) => <label key={metric.key} className="flex cursor-pointer items-start gap-3 rounded-lg border border-white/[.07] bg-white/[.025] p-3 hover:border-white/[.13]"><input type="checkbox" checked={Boolean(property[metric.key])} onChange={(event) => change(property.propertyId, metric.key, event.target.checked)} className="mt-0.5 size-4 accent-[#58e0c0]"/><span><span className="block text-xs font-medium text-[#dce7e4]">{metric.label}</span><span className="mt-1 block text-[10px] leading-4 text-[#61706c]">{metric.detail}</span></span></label>)}</div>
+      </div>
+    </article>)}{!properties.length && <div className="za-panel text-sm text-[#71817c]">No active public HTTPS properties are available.</div>}</section>}
+    {message && <p className={`text-xs ${message.includes("saved") || message.includes("refreshed") ? "text-[#70d9b9]" : "text-[#ff9d96]"}`}>{message}</p>}
+  </div>;
+}
 
 export function Outcomes({ properties, goals, funnels, briefs, onRefresh }: { properties: Property[]; goals: Array<any>; funnels: FunnelData[]; briefs: BriefData[]; onRefresh: () => Promise<void> }) {
   const [propertyId, setPropertyId] = useState(properties[0]?.id ?? ""); const [goalName, setGoalName] = useState(""); const [eventName, setEventName] = useState("outbound-click");

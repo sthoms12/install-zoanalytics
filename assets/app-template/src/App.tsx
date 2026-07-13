@@ -10,10 +10,10 @@ import {
   IconGlobe, IconLink, IconListCheck, IconRadar, IconRefresh, IconSearch,
   IconSeo, IconSparkles, IconTargetArrow, IconWorldSearch,
   IconBell, IconGitBranch, IconHeartbeat, IconHistory, IconRoute, IconTrophy,
-  IconBrandCloudflare, IconBrandGithub,
+  IconBrandCloudflare, IconBrandGithub, IconEye,
 } from "@tabler/icons-react";
 import { ThemeProvider } from "@/components/theme-provider";
-import { ActionCenter, Outcomes, PageExplorer, SetupGuide, type ActionData, type BriefData, type FunnelData, type SetupData } from "@/product";
+import { ActionCenter, Outcomes, PageExplorer, PulseSettings, SetupGuide, type ActionData, type BriefData, type FunnelData, type SetupData } from "@/product";
 
 type Property = {
   id: string; name: string; kind: "space" | "site" | "service" | "external"; url: string;
@@ -76,7 +76,7 @@ type Intelligence = {
   collectorOrigin: string;
 };
 
-type View = "overview" | "actions" | "traffic" | "content" | "seo" | "technical" | "outcomes" | "intelligence";
+type View = "overview" | "actions" | "traffic" | "content" | "seo" | "technical" | "outcomes" | "pulse" | "intelligence";
 const views: Array<{ id: View; label: string; icon: typeof IconRadar }> = [
   { id: "overview", label: "Overview", icon: IconRadar },
   { id: "actions", label: "Actions", icon: IconTargetArrow },
@@ -85,6 +85,7 @@ const views: Array<{ id: View; label: string; icon: typeof IconRadar }> = [
   { id: "seo", label: "Search & links", icon: IconWorldSearch },
   { id: "technical", label: "Site audit", icon: IconBrandSpeedtest },
   { id: "outcomes", label: "Outcomes", icon: IconTrophy },
+  { id: "pulse", label: "Public Pulse", icon: IconEye },
   { id: "intelligence", label: "Intelligence", icon: IconSparkles },
 ];
 
@@ -187,18 +188,18 @@ function DashboardApp() {
         {error && <div className="mb-5 flex items-center justify-between gap-3 rounded-lg border border-[#ff796f]/25 bg-[#ff796f]/8 px-4 py-3 text-sm text-[#ffc2bd]"><span>{error}</span><button onClick={() => setError("")} className="text-xs font-semibold">Dismiss</button></div>}
 
         <div id="dashboard-content">
-          {setup && <SetupGuide setup={setup} onRefresh={load} onAudit={crawl} />}
-          <section className="mb-6 grid gap-px overflow-hidden rounded-xl border border-white/[.08] bg-white/[.08] sm:grid-cols-2 xl:grid-cols-5">
-            <Kpi label="Portfolio health" value={`${score}`} suffix="/100" note={`${filtered.totals.tracked}/${filtered.totals.properties} tracked · ${filtered.totals.averageSeoScore || 0} audit`} icon={IconSparkles} accent />
-            <Kpi label="Pageviews" value={n(filtered.totals.pageviews)} note={`${trend(filtered.comparison.pageviews)} vs previous period`} icon={IconActivity} />
-            <Kpi label="Visitors" value={n(filtered.totals.visitors)} note={`${trend(filtered.comparison.visitors)} vs previous period`} icon={IconSearch} />
-            <Kpi label="Crawled pages" value={n(filtered.totals.crawledPages)} note={`${filtered.totals.averageSeoScore || 0} average SEO score`} icon={IconSeo} />
-            <Kpi label="Observed links" value={n(filtered.totals.backlinks)} note={`${n(filtered.totals.referringDomains)} referring domains`} icon={IconLink} />
-          </section>
-
-          <SourceStrip data={filtered} />
-
-          {property !== "all" && <PropertyBrief data={filtered} property={data.properties.find((item) => item.id === property)!} />}
+          {view !== "pulse" && <>
+            {setup && <SetupGuide setup={setup} onRefresh={load} onAudit={crawl} />}
+            <section className="mb-6 grid gap-px overflow-hidden rounded-xl border border-white/[.08] bg-white/[.08] sm:grid-cols-2 xl:grid-cols-5">
+              <Kpi label="Portfolio health" value={`${score}`} suffix="/100" note={`${filtered.totals.tracked}/${filtered.totals.properties} tracked · ${filtered.totals.averageSeoScore || 0} audit`} icon={IconSparkles} accent />
+              <Kpi label="Pageviews" value={n(filtered.totals.pageviews)} note={`${trend(filtered.comparison.pageviews)} vs previous period`} icon={IconActivity} />
+              <Kpi label="Visitors" value={n(filtered.totals.visitors)} note={`${trend(filtered.comparison.visitors)} vs previous period`} icon={IconSearch} />
+              <Kpi label="Crawled pages" value={n(filtered.totals.crawledPages)} note={`${filtered.totals.averageSeoScore || 0} average SEO score`} icon={IconSeo} />
+              <Kpi label="Observed links" value={n(filtered.totals.backlinks)} note={`${n(filtered.totals.referringDomains)} referring domains`} icon={IconLink} />
+            </section>
+            <SourceStrip data={filtered} />
+            {property !== "all" && <PropertyBrief data={filtered} property={data.properties.find((item) => item.id === property)!} />}
+          </>}
 
           {view === "overview" && <Overview data={filtered} name={name} onSelectProperty={setProperty} />}
           {view === "actions" && <ActionCenter actions={actions.filter((item) => property === "all" || item.propertyId === property)} properties={data.properties} onRefresh={load} />}
@@ -207,6 +208,7 @@ function DashboardApp() {
           {view === "seo" && <SearchLinks data={filtered} />}
           {view === "technical" && <Technical data={filtered} />}
           {view === "outcomes" && intelligence && <Outcomes properties={filtered.properties} goals={filterIntelligence(intelligence, property).goals} funnels={funnels.filter((item) => property === "all" || item.propertyId === property)} briefs={briefs} onRefresh={load} />}
+          {view === "pulse" && <PulseSettings />}
           {view === "intelligence" && intelligence && <IntelligenceView data={filtered} intelligence={filterIntelligence(intelligence, property)} reload={load} />}
         </div>
       </div>

@@ -8,6 +8,7 @@ import { crawlAllPublicProperties, crawlProperty } from "./backend-lib/crawler";
 import { addCompetitor, addRankKeyword, createGoal, createWeeklyReport, discoverProperties, discoverWebBacklinks, getIntelligence, recordRank, runRankChecks } from "./backend-lib/intelligence";
 import { createFunnel, exportRows, getActionCenter, getBriefs, getPageDetail, getSetupStatus, listFunnels, rowsToCsv, setActionState, verifyTracker } from "./backend-lib/product";
 import { addExternalProperty, discoverExternalProperties, getExternalSources } from "./backend-lib/external";
+import { getPublicPulse, listPulseConfig, pulsePageHtml, refreshPulseSnapshot, updatePulseConfig } from "./backend-lib/pulse";
 
 type Mode = "development" | "production";
 const app = new Hono();
@@ -24,6 +25,22 @@ const corsHeaders = {
 };
 
 app.get("/api/health", (c) => c.json({ ok: true, app: "ZoAnalytics", version: getSetupStatus().appVersion }));
+app.get("/api/pulse", (c) => c.json(getPublicPulse(), 200, {
+  "Access-Control-Allow-Origin": "*",
+  "Cache-Control": "public, max-age=300, stale-while-revalidate=600",
+  "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
+  "X-Content-Type-Options": "nosniff",
+}));
+app.get("/pulse", (c) => new Response(pulsePageHtml(), {
+  headers: {
+    "Content-Type": "text/html; charset=utf-8",
+    "Cache-Control": "public, max-age=300, stale-while-revalidate=600",
+    "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+  },
+}));
 app.use("/api/analytics/*", async (c, next) => {
   if (!collectorOnly) return next();
   if (c.req.path === "/api/analytics/collect") return next();
@@ -40,6 +57,13 @@ const collectorOrigin = process.env.ZOANALYTICS_PUBLIC_ORIGIN
   ?? (config.publish?.label && ownerHandle ? `https://${config.publish.label}-${ownerHandle}.zocomputer.io` : "");
 app.get("/api/analytics/intelligence", (c) => c.json({ ...getIntelligence(), collectorOrigin, externalSources: getExternalSources() }));
 app.get("/api/analytics/setup", (c) => c.json(getSetupStatus()));
+app.get("/api/analytics/pulse/config", (c) => c.json({ properties: listPulseConfig(), publicUrl: collectorOrigin ? `${collectorOrigin}/pulse` : "" }));
+app.patch("/api/analytics/pulse/config/:propertyId", async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  try { return c.json({ property: updatePulseConfig(c.req.param("propertyId"), body), snapshot: getPublicPulse() }); }
+  catch (error) { return c.json({ error: error instanceof Error ? error.message : "Could not update Pulse settings" }, 400); }
+});
+app.post("/api/analytics/pulse/refresh", (c) => c.json({ snapshot: refreshPulseSnapshot() }));
 app.get("/api/analytics/actions", (c) => c.json({ actions: getActionCenter() }));
 app.patch("/api/analytics/actions/:key", async (c) => {
   const body = await c.req.json().catch(() => ({}));
@@ -229,7 +253,7 @@ app.get("/zowa.js", (c) => {
 });
 
 if (collectorOnly) {
-  app.get("*", (c) => c.json({ ok: true, app: "ZoAnalytics collector", endpoints: ["/zowa.js", "/api/analytics/collect"] }));
+  app.get("*", (c) => c.json({ ok: true, app: "ZoAnalytics collector", endpoints: ["/pulse", "/api/pulse", "/zowa.js", "/api/analytics/collect"] }));
 } else if (mode === "production") {
   configureProduction(app);
 } else {

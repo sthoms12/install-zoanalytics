@@ -53,7 +53,7 @@ export type CollectPayload = {
   campaign?: { source?: string; medium?: string; campaign?: string; content?: string; term?: string };
 };
 
-export const APP_VERSION = "0.3.0";
+export const APP_VERSION = "0.4.0";
 
 export type CrawlPageInput = {
   propertyId: string;
@@ -386,6 +386,26 @@ function migrate() {
       PRIMARY KEY (property_id, provider)
     );
 
+    CREATE TABLE IF NOT EXISTS pulse_config (
+      property_id TEXT PRIMARY KEY REFERENCES properties(id) ON DELETE CASCADE,
+      enabled INTEGER NOT NULL DEFAULT 0,
+      display_name TEXT,
+      show_url INTEGER NOT NULL DEFAULT 1,
+      show_pageviews INTEGER NOT NULL DEFAULT 1,
+      show_visitors INTEGER NOT NULL DEFAULT 0,
+      show_trend INTEGER NOT NULL DEFAULT 1,
+      show_audit INTEGER NOT NULL DEFAULT 1,
+      show_vitals INTEGER NOT NULL DEFAULT 1,
+      show_authority INTEGER NOT NULL DEFAULT 1,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS pulse_snapshots (
+      id TEXT PRIMARY KEY,
+      generated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      payload TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS common_crawl_targets (
       property_id TEXT NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
       hostname TEXT NOT NULL,
@@ -445,7 +465,7 @@ function migrate() {
   ensureColumn("properties", "lifecycle", "TEXT NOT NULL DEFAULT 'active'");
   ensureColumn("properties", "retired_at", "TEXT");
   db.prepare("UPDATE properties SET lifecycle='retired', retired_at=COALESCE(retired_at, CURRENT_TIMESTAMP) WHERE url NOT LIKE 'http%'").run();
-  db.prepare("INSERT OR IGNORE INTO schema_migrations (version) VALUES (3)").run();
+  db.prepare("INSERT OR IGNORE INTO schema_migrations (version) VALUES (4)").run();
   db.prepare("INSERT INTO app_settings (key, value) VALUES ('app_version', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP").run(APP_VERSION);
 }
 

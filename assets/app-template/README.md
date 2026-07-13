@@ -17,6 +17,7 @@ No paid analytics or SEO API is required.
 ## Product workflow
 
 - Guided setup discovers public surfaces, verifies tracker HTML without generating synthetic visits, runs a baseline crawl, and confirms goals.
+- A separate Public Pulse view publishes only explicitly enabled properties and aggregate metrics.
 - The Action Center orders evidence-backed recommendations by impact, confidence, and effort.
 - Unified page detail combines traffic, events, p75 field performance, technical findings, observed rankings, links, changes, and errors.
 - Goals, ordered funnels, stored weekly briefs, and CSV exports are managed from the private dashboard.
@@ -38,6 +39,7 @@ bun run discover
 bun run external-discovery
 bun run crawl -- --max-pages 20
 bun run intelligence all
+bun run pulse-refresh
 bun run common-crawl-sync --metadata-only
 bun run doctor
 bun run backup
@@ -47,7 +49,7 @@ The installer update workflow runs a backup before replacing application source 
 
 ## Tracker
 
-The public collector serves `/zowa.js` and `/api/analytics/collect`.
+The public collector serves `/pulse`, `/api/pulse`, `/zowa.js`, and `/api/analytics/collect`. The Pulse page is empty on a fresh install. Use the private dashboard's **Public Pulse** view to enable a property and select its public URL, pageviews, anonymous visitors, trend, audit score, Web Vitals, or Zo Authority. The public service reads only generated snapshots and cannot access private dashboard APIs.
 
 ```html
 <script defer src="https://YOUR-COLLECTOR/zowa.js" data-site="YOUR-PROPERTY-ID"></script>

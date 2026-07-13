@@ -13,7 +13,7 @@ Install the bundled app template into a new workspace folder and configure publi
 - Never overwrite a non-empty target directory.
 - Include only public Space page routes, published public Sites, public HTTP services, and anonymously reachable production external sites.
 - Exclude private routes/sites/services, `*.zo.computer`, TCP/process services, unpublished previews, localhost/private networks, and ZoAnalytics itself.
-- Keep the dashboard private. Publish only the collector surface unless the user explicitly chooses another authenticated deployment.
+- Keep the dashboard private. Publish only the collector, tracker, and opt-in Pulse surfaces unless the user explicitly chooses another authenticated deployment.
 
 ## Install
 
@@ -33,6 +33,8 @@ bun run scripts/install.ts \
 5. Confirm the first launch reports zero properties and creates a new ignored `data/zoanalytics.db`.
 6. Publish the Zo Site as the public collector with `ZOANALYTICS_COLLECTOR_ONLY=true`. Keep the dashboard in its private Zo Site preview unless a separate authenticated deployment is deliberately configured.
 7. Set `ZOANALYTICS_PUBLIC_ORIGIN` for the private dashboard to the collector's final HTTPS origin.
+
+The installed dashboard includes a **Public Pulse** view. Every property starts disabled. Enable only the properties and aggregate metrics the user deliberately chooses to publish. Pulse snapshots must never contain raw visitor, session, path, referrer, campaign, event, error, or repository data.
 
 ## Discover public surfaces
 
@@ -71,6 +73,8 @@ Confirm:
 - No private surface appears in the property list.
 - Unknown property IDs are rejected by the collector.
 - The dashboard API is unavailable in collector-only mode.
+- `/pulse` and `/api/pulse` are available in collector-only mode, while Pulse configuration remains private.
+- A fresh install publishes zero Pulse properties.
 - A browser event for an accepted property is stored while bots and automated browsers are dropped.
 
 Run `/root/.codex/skills/.system/skill-creator/scripts/quick_validate.py` against this skill when modifying its packaging.

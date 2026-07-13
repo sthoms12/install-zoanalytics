@@ -11,5 +11,6 @@ Data flow:
 5. The public collector receives cookie-free telemetry only for known property IDs.
 6. The private dashboard reads the same local database.
 7. Local crawling, public rank observations, observed referrers, and Common Crawl provide independent intelligence.
+8. The optional public Pulse reads only a generated aggregate snapshot. Property and metric publication remain off until explicitly enabled in the private dashboard.
 
 The app never depends on a bundled account identity or paid analytics provider. Runtime `data/`, `.env`, crawl caches, and build output are ignored by Git.
