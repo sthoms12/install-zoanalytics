@@ -37,4 +37,6 @@ Discovery reads `data/discovery-manifest.json` and writes `data/discovery-status
 
 `backend-lib/confidence.ts` owns data-state interpretation. Traffic is live for 15 minutes and current for 48 hours; crawler, rankings, backlinks, authority, and Pulse snapshots are current for eight days; Ledger outcomes use a 30-day freshness window. A zero previous baseline never produces a percentage, and Core Web Vitals remain insufficient until five observations exist. Keep these rules consistent across the API and dashboard.
 
+`backend-lib/workspace.ts` owns the property-centered aggregate. Keep Summary, Audience, Visibility, Improve, and Outcomes independently readable with section-level status/error metadata, and preserve property plus section in the dashboard URL.
+
 `getActionCenter()` remains the atomic action source. `getActionCampaigns()` groups open actions into work campaigns, and `setActionCampaignState()` updates every child in one SQLite transaction. Keep source verification distinct from manually marking a campaign resolved.

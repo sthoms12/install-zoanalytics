@@ -10,7 +10,7 @@ import {
   IconGlobe, IconLink, IconListCheck, IconRadar, IconRefresh, IconSearch,
   IconSeo, IconSparkles, IconTargetArrow, IconWorldSearch,
   IconBell, IconGitBranch, IconHeartbeat, IconHistory, IconRoute, IconTrophy,
-  IconBrandCloudflare, IconBrandGithub, IconEye,
+  IconBrandCloudflare, IconBrandGithub, IconEye, IconArrowLeft,
 } from "@tabler/icons-react";
 import { ThemeProvider } from "@/components/theme-provider";
 import { DataStateBadge, FreshnessLabel, SampleWarning, relativeTime, type DataQualitySignal } from "@/components/data-state";
@@ -81,6 +81,16 @@ type Intelligence = {
 };
 
 type View = "overview" | "actions" | "traffic" | "content" | "seo" | "technical" | "outcomes" | "ledger" | "pulse" | "intelligence";
+type WorkspaceSection = "summary" | "audience" | "visibility" | "improve" | "outcomes";
+type PropertyWorkspaceData = {
+  property: Property & { aliases: Array<{ url: string }>; sources: Array<{ provider: string; repository: string | null; repositoryUrl: string | null }> };
+  days: number; freshness: Record<string, any>;
+  summary: { status: string; error: string | null; data: { rollup: Dashboard["propertyRollups"][number] | null; comparison: Dashboard["propertyComparisons"][number] | null; trend: Dashboard["trend"]; pulse: any; openCampaigns: ActionCampaignData[] } };
+  audience: { status: string; error: string | null; data: { topPages: Dashboard["topPages"]; recentActivity: Dashboard["recentActivity"]; referrers: Dashboard["referrerSummary"]; devices: Dashboard["deviceSummary"]; events: Dashboard["eventSummary"] } };
+  visibility: { status: string; error: string | null; data: { pages: Dashboard["latestCrawledPages"]; findings: Dashboard["seoFindings"]; rankings: Dashboard["rankVisibility"]; authority: Dashboard["authorityScores"]; vitals: Intelligence["vitals"] } };
+  improve: { status: string; error: string | null; data: { campaigns: ActionCampaignData[]; opportunities: Dashboard["opportunityPages"]; errors: Intelligence["errors"] } };
+  outcomes: { status: string; error: string | null; data: { goals: Intelligence["goals"]; funnels: FunnelData[]; ledger: LedgerEvent[]; conversions: number } };
+};
 const views: Array<{ id: View; label: string; icon: typeof IconRadar }> = [
   { id: "overview", label: "Overview", icon: IconRadar },
   { id: "actions", label: "Actions", icon: IconTargetArrow },
@@ -118,6 +128,7 @@ export default function App() {
 }
 
 function DashboardApp() {
+  const initialParams = new URLSearchParams(window.location.search);
   const [data, setData] = useState<Dashboard | null>(null);
   const [intelligence, setIntelligence] = useState<Intelligence | null>(null);
   const [setup, setSetup] = useState<SetupData | null>(null);
@@ -126,7 +137,9 @@ function DashboardApp() {
   const [briefs, setBriefs] = useState<BriefData[]>([]);
   const [ledger, setLedger] = useState<LedgerEvent[]>([]);
   const [view, setView] = useState<View>("overview");
-  const [property, setProperty] = useState("all");
+  const [property, setProperty] = useState(initialParams.get("property") ?? "all");
+  const [workspaceSection, setWorkspaceSection] = useState<WorkspaceSection>((initialParams.get("section") as WorkspaceSection) || "summary");
+  const [workspace, setWorkspace] = useState<PropertyWorkspaceData | null>(null);
   const [days, setDays] = useState(30);
   const [loading, setLoading] = useState(true);
   const [crawling, setCrawling] = useState(false);
@@ -151,6 +164,26 @@ function DashboardApp() {
     finally { setLoading(false); }
   }
   useEffect(() => { void load(); }, [days]);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (property === "all") { params.delete("property"); params.delete("section"); }
+    else { params.set("property", property); params.set("section", workspaceSection); }
+    history.replaceState(null, "", `${window.location.pathname}${params.size ? `?${params}` : ""}`);
+  }, [property, workspaceSection]);
+  useEffect(() => {
+    if (property === "all") { setWorkspace(null); return; }
+    let cancelled = false;
+    setWorkspace(null);
+    fetch(`/api/analytics/properties/${encodeURIComponent(property)}/workspace?days=${days}`, { headers: { Accept: "application/json" } })
+      .then(async (response) => { if (!response.ok) throw new Error("Property workspace could not be read"); return response.json(); })
+      .then((value) => { if (!cancelled) setWorkspace(value); })
+      .catch((cause) => { if (!cancelled) setError(cause instanceof Error ? cause.message : "Property workspace failed"); });
+    return () => { cancelled = true; };
+  }, [property, days, actionCampaigns.length, ledger.length]);
+
+  function openProperty(id: string) { setProperty(id); setWorkspaceSection("summary"); }
+  function closeProperty() { setProperty("all"); setWorkspace(null); setView("overview"); }
+  function navigate(id: View) { setProperty("all"); setWorkspace(null); setView(id); }
 
   async function crawl() {
     setCrawling(true); setError("");
@@ -179,7 +212,7 @@ function DashboardApp() {
               <div><p className="text-sm font-semibold tracking-[-.02em]">ZoAnalytics</p><p className="hidden text-[10px] text-[#73827e] sm:block">PRIVATE INTELLIGENCE</p></div>
             </div>
             <nav className="za-scrollbar-none hidden min-w-0 flex-1 items-center gap-1 overflow-x-auto lg:flex" aria-label="Dashboard views">
-              {views.map(({ id, label, icon: Icon }) => <NavButton key={id} active={view === id} onClick={() => setView(id)} icon={Icon} label={label} />)}
+              {views.map(({ id, label, icon: Icon }) => <NavButton key={id} active={property === "all" && view === id} onClick={() => navigate(id)} icon={Icon} label={label} />)}
             </nav>
             <div className="flex items-center gap-2">
               <button onClick={() => void load()} disabled={loading} className="za-icon-button" aria-label="Refresh dashboard"><IconRefresh size={17} className={loading ? "animate-spin" : ""} /></button>
@@ -187,19 +220,19 @@ function DashboardApp() {
             </div>
           </div>
           <nav className="za-scrollbar-none -mx-1 flex gap-1 overflow-x-auto pb-2 lg:hidden" aria-label="Dashboard views">
-            {views.map(({ id, label, icon: Icon }) => <NavButton key={id} active={view === id} onClick={() => setView(id)} icon={Icon} label={label} />)}
+            {views.map(({ id, label, icon: Icon }) => <NavButton key={id} active={property === "all" && view === id} onClick={() => navigate(id)} icon={Icon} label={label} />)}
           </nav>
         </header>
 
         <section className="flex flex-col gap-5 pb-7 pt-8 sm:pt-10 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <div className="mb-3 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[.16em] text-[#58e0c0]"><span className="size-1.5 rounded-full bg-[#58e0c0] shadow-[0_0_12px_#58e0c0]" />{viewCopy[view].eyebrow}</div>
-            <h1 className="max-w-4xl text-[2.35rem] font-semibold leading-[.98] tracking-[-.055em] sm:text-6xl lg:text-[4.6rem]">{viewCopy[view].title}<br/><span className="text-[#7f8e8a]">{viewCopy[view].subtitle}</span></h1>
+            <div className="mb-3 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[.16em] text-[#58e0c0]"><span className="size-1.5 rounded-full bg-[#58e0c0] shadow-[0_0_12px_#58e0c0]" />{property === "all" ? viewCopy[view].eyebrow : "Property workspace"}</div>
+            <h1 className="max-w-4xl text-[2.35rem] font-semibold leading-[.98] tracking-[-.055em] sm:text-6xl lg:text-[4.6rem]">{property === "all" ? viewCopy[view].title : name}<br/><span className="text-[#7f8e8a]">{property === "all" ? viewCopy[view].subtitle : "One property. Every signal in context."}</span></h1>
           </div>
           <div className="flex flex-col items-start gap-2 lg:items-end">
             <span className="text-[10px] font-semibold uppercase tracking-[.16em] text-[#65736f]">Scope & period</span>
             <div className="za-scrollbar-none flex max-w-full gap-2 overflow-x-auto pb-1">
-              <div className="relative"><IconFilter className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#71807c]" size={15}/><select aria-label="Property scope" value={property} onChange={(event) => setProperty(event.target.value)} className="h-10 min-w-48 appearance-none rounded-lg border border-white/10 bg-white/[.045] pl-9 pr-9 text-sm font-medium text-[#dbe6e3] outline-none transition focus:border-[#58e0c0]/60 focus:ring-2 focus:ring-[#58e0c0]/15"><option value="all">All properties</option>{data.properties.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><IconChevronRight className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rotate-90 text-[#71807c]" size={14}/></div>
+              <div className="relative"><IconFilter className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#71807c]" size={15}/><select aria-label="Property scope" value={property} onChange={(event) => event.target.value === "all" ? closeProperty() : openProperty(event.target.value)} className="h-10 min-w-48 appearance-none rounded-lg border border-white/10 bg-white/[.045] pl-9 pr-9 text-sm font-medium text-[#dbe6e3] outline-none transition focus:border-[#58e0c0]/60 focus:ring-2 focus:ring-[#58e0c0]/15"><option value="all">All properties</option>{data.properties.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><IconChevronRight className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rotate-90 text-[#71807c]" size={14}/></div>
               <div className="flex rounded-lg border border-white/10 bg-white/[.025] p-1">{[7,14,30,90].map((value) => <button key={value} onClick={() => setDays(value)} className={`rounded-md px-2.5 text-xs font-semibold tabular-nums transition ${days === value ? "bg-[#58e0c0] text-[#07110e]" : "text-[#71807c] hover:text-white"}`}>{value}d</button>)}</div>
             </div>
           </div>
@@ -208,6 +241,7 @@ function DashboardApp() {
         {error && <div className="mb-5 flex items-center justify-between gap-3 rounded-lg border border-[#ff796f]/25 bg-[#ff796f]/8 px-4 py-3 text-sm text-[#ffc2bd]"><span>{error}</span><button onClick={() => setError("")} className="text-xs font-semibold">Dismiss</button></div>}
 
         <div id="dashboard-content">
+          {property !== "all" ? workspace ? <PropertyWorkspace workspace={workspace} dashboard={filtered} section={workspaceSection} onSection={setWorkspaceSection} onBack={closeProperty} onAudit={crawl} /> : <div className="grid min-h-64 place-items-center"><div className="size-8 animate-spin rounded-full border-2 border-white/10 border-t-[#58e0c0]" /></div> : <>
           {view !== "pulse" && <>
             {setup && <SetupGuide setup={setup} onRefresh={load} onAudit={crawl} />}
             <section className="mb-6 grid gap-px overflow-hidden rounded-xl border border-white/[.08] bg-white/[.08] sm:grid-cols-2 xl:grid-cols-5">
@@ -218,10 +252,9 @@ function DashboardApp() {
               <Kpi label="Observed links" value={n(filtered.totals.backlinks)} note={`${n(filtered.totals.referringDomains)} referring domains`} icon={IconLink} />
             </section>
             <SourceStrip data={filtered} />
-            {property !== "all" && <PropertyBrief data={filtered} property={data.properties.find((item) => item.id === property)!} />}
           </>}
 
-          {view === "overview" && <Overview data={filtered} name={name} onSelectProperty={setProperty} />}
+          {view === "overview" && <Overview data={filtered} name={name} onSelectProperty={openProperty} />}
           {view === "actions" && <ActionCenter campaigns={actionCampaigns.filter((item) => property === "all" || item.propertyId === property)} properties={data.properties} onRefresh={load} />}
           {view === "traffic" && <Traffic data={filtered} />}
           {view === "content" && <Content data={filtered} />}
@@ -231,10 +264,40 @@ function DashboardApp() {
           {view === "ledger" && <Ledger events={ledger.filter((item) => property === "all" || item.propertyId === property)} properties={data.properties} onRefresh={load} />}
           {view === "pulse" && <PulseSettings />}
           {view === "intelligence" && intelligence && <IntelligenceView data={filtered} intelligence={filterIntelligence(intelligence, property)} reload={load} />}
+          </>}
         </div>
       </div>
     </main>
   );
+}
+
+function PropertyWorkspace({ workspace, dashboard, section, onSection, onBack, onAudit }: { workspace: PropertyWorkspaceData; dashboard: Dashboard; section: WorkspaceSection; onSection: (section: WorkspaceSection) => void; onBack: () => void; onAudit: () => Promise<void> }) {
+  const property = workspace.property;
+  const rollup = workspace.summary.data.rollup;
+  const tracker = workspace.freshness.tracker as DataQualitySignal | null;
+  const crawler = workspace.freshness.crawler as DataQualitySignal | null;
+  const tabs: Array<{ id: WorkspaceSection; label: string }> = [
+    { id: "summary", label: "Summary" }, { id: "audience", label: "Audience" }, { id: "visibility", label: "Visibility" }, { id: "improve", label: "Improve" }, { id: "outcomes", label: "Outcomes" },
+  ];
+  return <div className="space-y-4">
+    <section className="overflow-hidden rounded-xl border border-[#58e0c0]/20 bg-[#0d1516]">
+      <div className="flex flex-col gap-5 p-5 lg:flex-row lg:items-end lg:justify-between">
+        <div className="min-w-0"><button onClick={onBack} className="mb-4 flex items-center gap-2 text-xs font-semibold text-[#71807c] transition hover:text-[#58e0c0]"><IconArrowLeft size={15}/>Portfolio overview</button><div className="flex flex-wrap items-center gap-2"><span className="text-[10px] font-semibold uppercase tracking-[.15em] text-[#58e0c0]">Property workspace</span>{tracker && <DataStateBadge signal={tracker} compact />}</div><h2 className="mt-3 text-3xl font-semibold tracking-[-.045em] sm:text-5xl">{property.name}</h2><a href={property.url} target="_blank" rel="noreferrer" className="mt-2 inline-flex max-w-full items-center gap-1.5 truncate text-xs text-[#71807c] hover:text-[#70d9b9]">{property.url}<IconExternalLink size={13}/></a></div>
+        <div className="flex flex-wrap gap-2"><button onClick={() => void onAudit()} className="za-primary-button"><IconBolt size={15}/>Run property audit</button>{workspace.summary.data.pulse?.enabled && <span className="flex items-center border border-[#58e0c0]/20 px-3 text-[10px] font-semibold uppercase tracking-wider text-[#70d9b9]">Published in Pulse</span>}</div>
+      </div>
+      <div className="grid gap-px border-t border-white/[.07] bg-white/[.07] sm:grid-cols-2 lg:grid-cols-4"><WorkspaceSignal label="Tracking" signal={tracker}/><WorkspaceSignal label="Last crawl" signal={crawler}/><WorkspaceSignal label="Rankings" signal={workspace.freshness.rankings}/><WorkspaceSignal label="Links" signal={workspace.freshness.links}/></div>
+      <nav className="za-scrollbar-none flex overflow-x-auto border-t border-white/[.07] px-3 pt-2" aria-label="Property workspace sections">{tabs.map((tab) => <button key={tab.id} onClick={() => onSection(tab.id)} className={`shrink-0 border-b-2 px-4 py-3 text-xs font-semibold transition ${section === tab.id ? "border-[#58e0c0] text-white" : "border-transparent text-[#71807c] hover:text-[#cbd6d3]"}`}>{tab.label}</button>)}</nav>
+    </section>
+    {section === "summary" && <><section className="grid gap-px overflow-hidden rounded-xl border border-white/[.08] bg-white/[.08] sm:grid-cols-2 xl:grid-cols-4"><Kpi label="Pageviews" value={n(rollup?.pageviews ?? 0)} note={workspace.summary.data.comparison?.pageviewsQuality.explanation ?? "No comparison available"} icon={IconActivity}/><Kpi label="Visitors" value={n(rollup?.visitors ?? 0)} note={workspace.summary.data.comparison?.visitorsQuality.explanation ?? "No comparison available"} icon={IconSearch}/><Kpi label="Audit score" value={rollup?.crawledPages ? String(rollup.averageSeoScore) : "—"} note={rollup?.crawledPages ? `${rollup.crawledPages} pages crawled` : "Not crawled"} icon={IconSeo}/><Kpi label="Open campaigns" value={String(workspace.summary.data.openCampaigns.length)} note={`${rollup?.totalFindings ?? 0} page-level findings`} icon={IconTargetArrow}/></section><section className="grid gap-4 xl:grid-cols-[1.4fr_.6fr]"><Panel title="Attention over time" eyebrow={`${workspace.days}-day property trend`} icon={IconChartAreaLine}><TrafficChart data={workspace.summary.data.trend}/></Panel><Panel title="Top work" eyebrow="Grouped campaigns" icon={IconTargetArrow}>{workspace.summary.data.openCampaigns.length ? <div className="space-y-2">{workspace.summary.data.openCampaigns.slice(0,5).map((campaign) => <div key={campaign.key} className="rounded-lg bg-white/[.025] p-3"><p className="text-sm font-medium">{campaign.title}</p><p className="mt-1 text-[10px] text-[#65736f]">{campaign.affectedPages} pages · {campaign.fixability.replace("-", " ")}</p></div>)}</div> : <Empty icon={IconCheck} title="No open campaigns" text="This property has no open grouped work."/>}</Panel></section></>}
+    {section === "audience" && <><section className="grid gap-4 lg:grid-cols-3"><Panel title="Top pages" eyebrow={`${workspace.days}-day traffic`} icon={IconFileAnalytics}><RankedRows rows={workspace.audience.data.topPages.map((row) => ({ title: row.path, label: property.name, value: row.views, suffix: `${row.visitors} visitors` }))}/></Panel><Panel title="Acquisition" eyebrow="Observed referrers" icon={IconExternalLink}><RankedRows rows={workspace.audience.data.referrers.map((row) => ({ title: row.source, label: `${row.pages} pages`, value: row.visits, suffix: "visits" }))}/></Panel><Panel title="Devices" eyebrow="Visitor mix" icon={IconDeviceDesktopAnalytics}><MixBars data={dashboard}/></Panel></section><Panel title="Recent activity" eyebrow="Latest first-party signals" icon={IconActivity}><ActivityFeed data={dashboard} expanded/></Panel></>}
+    {section === "visibility" && <><section className="grid gap-4 xl:grid-cols-[.8fr_1.2fr]"><Panel title="Audit health" eyebrow={`${rollup?.crawledPages ?? 0} pages inspected`} icon={IconBrandSpeedtest}>{rollup?.crawledPages ? <div className="grid place-items-center py-4"><ScoreRing score={rollup.averageSeoScore}/></div> : <Empty icon={IconBrandSpeedtest} title="Not crawled" text="Run the property audit to create a technical baseline."/>}</Panel><Panel title="Core Web Vitals" eyebrow="Real-user p75" icon={IconHeartbeat}>{workspace.visibility.data.vitals.length ? <div className="grid gap-px overflow-hidden rounded-lg bg-white/[.07] sm:grid-cols-3">{workspace.visibility.data.vitals.map((item) => <div key={item.metric} className="bg-[#0d1315] p-4"><p className="text-xs text-[#71807c]">{item.metric}</p><p className="mt-2 text-2xl font-semibold">{item.samples >= 5 ? item.p75 : "—"}</p><p className="mt-1 text-[10px] text-[#61706c]">{item.samples} samples</p></div>)}</div> : <Empty icon={IconHeartbeat} title="Collecting field data" text="Vitals appear after real visitors provide samples."/>}</Panel></section><PageAuditTable data={dashboard}/></>}
+    {section === "improve" && <><ActionCenter campaigns={workspace.improve.data.campaigns} properties={[property]} onRefresh={async () => { window.location.reload(); }}/><Panel title="Content opportunities" eyebrow="Highest potential first" icon={IconSparkles}><OpportunityList data={dashboard} expanded/></Panel></>}
+    {section === "outcomes" && <><section className="grid gap-px overflow-hidden rounded-xl border border-white/[.08] bg-white/[.08] sm:grid-cols-3"><Kpi label="Conversions" value={n(workspace.outcomes.data.conversions)} note={`${workspace.outcomes.data.goals.length} active goals`} icon={IconTargetArrow}/><Kpi label="Funnels" value={n(workspace.outcomes.data.funnels.length)} note="Configured journeys" icon={IconRoute}/><Kpi label="Recorded changes" value={n(workspace.outcomes.data.ledger.length)} note="Ledger events in 180 days" icon={IconHistory}/></section><Ledger events={workspace.outcomes.data.ledger} properties={[property]} onRefresh={async () => { window.location.reload(); }}/></>}
+  </div>;
+}
+
+function WorkspaceSignal({ label, signal }: { label: string; signal: DataQualitySignal | null }) {
+  return <div className="bg-[#0b1113] p-4"><p className="text-[9px] font-semibold uppercase tracking-[.14em] text-[#60706b]">{label}</p><div className="mt-2">{signal ? <FreshnessLabel signal={signal}/> : <span className="text-xs text-[#71807c]">Unavailable</span>}</div><p className="mt-2 line-clamp-2 text-[10px] leading-4 text-[#61706c]">{signal?.explanation ?? "No source state is available."}</p></div>;
 }
 
 function Overview({ data, name, onSelectProperty }: { data: Dashboard; name: string; onSelectProperty: (id: string) => void }) {

@@ -12,6 +12,7 @@ import { getPublicPulse, listPulseConfig, pulsePageHtml, refreshPulseSnapshot, u
 import { deleteChangeEvent, getLedger, logManualChangeEvent } from "./backend-lib/ledger";
 import { applyFix, getFixCapability, listFixes, previewFix, revertFix } from "./backend-lib/fixes";
 import { startWeeklyRefreshScheduler } from "./backend-lib/scheduler";
+import { getPropertyWorkspace } from "./backend-lib/workspace";
 
 type Mode = "development" | "production";
 const app = new Hono();
@@ -50,6 +51,11 @@ app.use("/api/analytics/*", async (c, next) => {
   return c.json({ error: "Private analytics APIs are unavailable on the public collector" }, 404, corsHeaders);
 });
 app.get("/api/analytics/properties", (c) => c.json({ properties: getProperties() }));
+app.get("/api/analytics/properties/:propertyId/workspace", async (c) => {
+  const days = Number.parseInt(c.req.query("days") ?? "30", 10);
+  const workspace = await getPropertyWorkspace(c.req.param("propertyId"), days);
+  return workspace ? c.json(workspace) : c.json({ error: "Property not found" }, 404);
+});
 app.get("/api/analytics/summary", (c) => {
   const days = Number.parseInt(c.req.query("days") ?? "30", 10);
   return c.json(getDashboard(days));
