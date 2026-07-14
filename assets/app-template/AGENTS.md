@@ -2,7 +2,7 @@
 
 ZoAnalytics is private analytics for public Zo web surfaces.
 
-Version `0.6.0` adds an opt-in public Pulse view with sanitized aggregate snapshots alongside account-neutral Cloudflare production discovery, GitHub repository matching, guided setup, tracker verification, Action Center, page detail, goals, funnels, briefs, exports, Web Vitals, migrations, backup, and doctor workflows. It also adds a Change-to-Outcome Ledger that lines up commits, crawler-detected content edits, tracker installs, and applied fixes against before/after traffic and SEO outcomes; a Safe Fix Laboratory that previews, applies, and reverts title/description/canonical/noindex fixes on eligible properties; a self-contained weekly data-refresh timer with no AI or external cron involved; and normalized freshness, verification, and sample states that prevent stale or statistically weak data from looking authoritative.
+Version `0.7.0` adds an opt-in public Pulse view with sanitized aggregate snapshots alongside account-neutral Cloudflare production discovery, GitHub repository matching, guided setup, tracker verification, Action Center, page detail, goals, funnels, briefs, exports, Web Vitals, migrations, backup, and doctor workflows. It also adds a Change-to-Outcome Ledger that lines up commits, crawler-detected content edits, tracker installs, and applied fixes against before/after traffic and SEO outcomes; a Safe Fix Laboratory that previews, applies, and reverts title/description/canonical/noindex fixes on eligible properties; a self-contained weekly data-refresh timer with no AI or external cron involved; normalized freshness, verification, and sample states; and section-aware dashboard loading with request cancellation and split production bundles.
 
 ## Invariants
 
@@ -42,5 +42,7 @@ Discovery reads `data/discovery-manifest.json` and writes `data/discovery-status
 `backend-lib/overview.ts` owns `/api/analytics/overview`. Only Ledger events with at least 20 observations and non-low confidence may appear as wins or regressions; keep all weaker evidence pending and use associative, never causal, language.
 
 Keep the five-area dashboard navigation and its nested tabs aligned with URL state (`area`, `tab`, `days`, `property`, `section`). Preserve legacy `view` bookmarks, browser back/forward restoration, keyboard focus movement, and the secondary Publish & data menu.
+
+Dashboard data loading is section-aware: `/api/analytics/summary` provides the portfolio shell and supporting APIs load only for the active workflow. Preserve AbortController cancellation when period or section changes supersede an in-flight request. Production chunks are split in `vite.config.ts`.
 
 `getActionCenter()` remains the atomic action source. `getActionCampaigns()` groups open actions into work campaigns, and `setActionCampaignState()` updates every child in one SQLite transaction. Keep source verification distinct from manually marking a campaign resolved.

@@ -43,7 +43,7 @@ async function post(path: string, body: Record<string, unknown> = {}) {
 type Delta = { before: number; after: number; change: number; pct: number };
 
 export type LedgerEvent = {
-  id: string; propertyId: string; propertyName: string; source: "commit" | "content" | "tracker" | "manual";
+  id: string; propertyId: string; propertyName: string; source: "commit" | "content" | "tracker" | "manual" | "fix";
   kind: string; title: string; detail: string | null; pageUrl: string | null; occurredAt: string;
   outcome: { windowDays: number; pageviews: Delta; visitors: Delta; engagement: Delta; poorVitals: Delta; seoScore: Delta | null; sampleSize: number; coOccurring: number; confidence: "low" | "medium" | "high" };
 };
@@ -55,6 +55,7 @@ const sourceMeta: Record<LedgerEvent["source"], { label: string; icon: typeof Ic
   content: { label: "Content edit", icon: IconFileAnalytics, color: "#efc86b" },
   tracker: { label: "Tracking", icon: IconShieldLock, color: "#58e0c0" },
   manual: { label: "Manual note", icon: IconFlag, color: "#c992ff" },
+  fix: { label: "Safe fix", icon: IconBolt, color: "#70d9b9" },
 };
 
 const confidenceColor: Record<string, string> = { low: "text-[#ff8178]", medium: "text-[#efc86b]", high: "text-[#70d9b9]" };
@@ -233,6 +234,7 @@ export function ActionCenter({ campaigns, properties, onRefresh }: { campaigns: 
   const [category, setCategory] = useState("all");
   const [severity, setSeverity] = useState("all");
   const [fixability, setFixability] = useState("all");
+  const [message, setMessage] = useState("");
 
   async function loadFixes() {
     const response = await fetch("/api/analytics/fixes", { headers: { Accept: "application/json" } });
@@ -242,21 +244,30 @@ export function ActionCenter({ campaigns, properties, onRefresh }: { campaigns: 
   useEffect(() => { void loadFixes(); }, []);
 
   async function updateCampaign(campaign: ActionCampaignData, status: "resolved" | "dismissed", snoozedUntil?: string) {
-    setBusy(campaign.key);
-    await fetch(`/api/analytics/action-campaigns/${encodeURIComponent(campaign.key)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status, snoozedUntil }) });
-    await onRefresh(); setBusy("");
+    setBusy(campaign.key); setMessage("");
+    try {
+      const response = await fetch(`/api/analytics/action-campaigns/${encodeURIComponent(campaign.key)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status, snoozedUntil }) });
+      if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || "Could not update campaign");
+      setMessage(snoozedUntil ? "Campaign snoozed for seven days." : `Campaign marked ${status}.`); await onRefresh();
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Could not update campaign"); }
+    finally { setBusy(""); }
   }
   async function updateAction(action: ActionData, status: "resolved" | "dismissed", snoozedUntil?: string) {
-    setBusy(action.key);
-    await fetch(`/api/analytics/actions/${encodeURIComponent(action.key)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status, snoozedUntil }) });
-    await onRefresh(); setBusy("");
+    setBusy(action.key); setMessage("");
+    try {
+      const response = await fetch(`/api/analytics/actions/${encodeURIComponent(action.key)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status, snoozedUntil }) });
+      if (!response.ok) throw new Error("Could not update page action");
+      setMessage(`Page action marked ${status}.`); await onRefresh();
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Could not update page action"); }
+    finally { setBusy(""); }
   }
   async function verifyCampaign(campaign: ActionCampaignData) {
-    setBusy(campaign.key);
+    setBusy(campaign.key); setMessage("");
     try {
       const response = await fetch(`/api/analytics/action-campaigns/${encodeURIComponent(campaign.key)}/verify`, { method: "POST", headers: { Accept: "application/json" } });
       if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || "Could not verify campaign");
-      await onRefresh();
+      setMessage("Source verification completed."); await onRefresh();
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Could not verify campaign");
     } finally { setBusy(""); }
   }
   async function revert(id: string) {
@@ -267,6 +278,7 @@ export function ActionCenter({ campaigns, properties, onRefresh }: { campaigns: 
   const visible = campaigns.filter((item) => (category === "all" || item.category === category) && (severity === "all" || item.severity === severity) && (fixability === "all" || item.fixability === fixability));
   const categories = [...new Set(campaigns.map((item) => item.category))];
   return <div className="space-y-4">
+    <div className="sr-only" role="status" aria-live="polite">{message}</div>
     <section className="grid gap-4 xl:grid-cols-[.72fr_1.28fr]"><div className="za-panel"><p className="text-[10px] font-semibold uppercase tracking-[.15em] text-[#58e0c0]">Work campaigns</p><h2 className="mt-2 text-3xl font-semibold tracking-[-.05em]">{campaigns.length} pieces of work</h2><p className="mt-3 max-w-md text-sm leading-6 text-[#71817c]">Repeated findings are grouped by property and recommended fix. Expand a campaign to inspect every affected page before acting.</p><div className="mt-5 grid gap-2 sm:grid-cols-3 xl:grid-cols-1"><select value={category} onChange={(event) => setCategory(event.target.value)} className="za-input"><option value="all">All categories</option>{categories.map((item) => <option key={item} value={item}>{item}</option>)}</select><select value={severity} onChange={(event) => setSeverity(event.target.value)} className="za-input"><option value="all">All severities</option><option value="critical">Critical</option><option value="warning">Warning</option><option value="info">Info</option></select><select value={fixability} onChange={(event) => setFixability(event.target.value)} className="za-input"><option value="all">All fixability</option><option value="fixable">Safe Fix ready</option><option value="partially-fixable">Partly fixable</option><option value="manual">Manual</option></select></div></div><div className="za-panel"><div className="space-y-1">{visible.map((campaign) => {
       const property = properties.find((item) => item.id === campaign.propertyId); const open = expanded === campaign.key;
       return <article key={campaign.key} className="border-b border-white/[.06] last:border-0"><button onClick={() => setExpanded(open ? null : campaign.key)} className="grid w-full grid-cols-[8px_1fr_auto] gap-3 px-2 py-4 text-left"><span className={`mt-1.5 size-2 rounded-full ${campaign.severity === "critical" ? "bg-[#ff8178]" : campaign.severity === "warning" ? "bg-[#efc86b]" : "bg-[#74837f]"}`}/><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="text-sm font-medium text-[#e2ebe8]">{campaign.title}</p><span className="rounded bg-white/[.06] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[.08em] text-[#82918d]">{campaign.fixability === "fixable" ? "Safe Fix ready" : campaign.fixability}</span></div><p className="mt-1 truncate text-[10px] uppercase tracking-[.08em] text-[#61706c]">{property?.name ?? campaign.propertyId} · {campaign.category} · {campaign.affectedPages} affected · priority {campaign.priority}</p></div><IconChevronRight size={16} className={`mt-1 text-[#56645f] transition ${open ? "rotate-90 text-[#58e0c0]" : ""}`}/></button>{open && <div className="mb-5 ml-5 border-l border-[#58e0c0]/20 pl-5"><div className="grid gap-4 py-2 md:grid-cols-3"><Detail label="Why it matters" text={campaign.rationale}/><Detail label="Evidence" text={campaign.representativeEvidence}/><Detail label="Recommended fix" text={campaign.recommendedFix}/></div><div className="mt-3 flex flex-wrap gap-2">{(campaign.category === "tracking" || campaign.category === "site audit") && <button disabled={busy === campaign.key} onClick={() => void verifyCampaign(campaign)} className="za-primary-button">Verify in source</button>}<button disabled={busy === campaign.key} onClick={() => void updateCampaign(campaign, "resolved")} className="za-secondary-button">Mark resolved</button><button disabled={busy === campaign.key} onClick={() => void updateCampaign(campaign, "dismissed")} className="za-secondary-button">Dismiss campaign</button><button disabled={busy === campaign.key} onClick={() => void updateCampaign(campaign, "resolved", new Date(Date.now() + 7 * 86400000).toISOString())} className="za-text-button">Snooze all 7 days</button></div><p className="mt-2 text-[10px] leading-4 text-[#61706c]">Verify in source reruns tracking or the audit. Mark resolved records your decision without changing the source.</p><div className="mt-4 overflow-hidden rounded-lg border border-white/[.07]"><p className="border-b border-white/[.06] bg-white/[.025] px-3 py-2 text-[9px] font-semibold uppercase tracking-[.14em] text-[#65736f]">Affected pages · {campaign.actions.length}</p>{campaign.actions.map((action) => <div key={action.key} className="border-b border-white/[.05] p-3 last:border-0"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-xs font-medium text-[#cbd7d3]">{action.title}</p><p className="mt-1 truncate text-[10px] text-[#61706c]">{action.pageUrl}</p></div><div className="flex shrink-0 gap-1"><button disabled={busy === action.key} onClick={() => void updateAction(action, "resolved")} className="za-text-button">Resolve</button><button disabled={busy === action.key} onClick={() => void updateAction(action, "dismissed")} className="za-text-button">Dismiss</button></div></div><FixLab action={action} onApplied={async () => { await loadFixes(); await onRefresh(); }} /></div>)}</div></div>}</article>;

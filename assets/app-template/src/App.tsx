@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
   Bar, BarChart,
@@ -167,28 +167,47 @@ function DashboardApp() {
   const [loading, setLoading] = useState(true);
   const [crawling, setCrawling] = useState(false);
   const [error, setError] = useState("");
+  const activeRequest = useRef<AbortController | null>(null);
 
   async function load() {
+    activeRequest.current?.abort();
+    const controller = new AbortController();
+    activeRequest.current = controller;
     setLoading(true); setError("");
     try {
-      const [summaryResponse, intelligenceResponse, setupResponse, campaignsResponse, funnelsResponse, briefsResponse, ledgerResponse, overviewResponse] = await Promise.all([
-        fetch(`/api/analytics/summary?days=${days}`, { headers: { Accept: "application/json" } }),
-        fetch("/api/analytics/intelligence", { headers: { Accept: "application/json" } }),
-        fetch("/api/analytics/setup", { headers: { Accept: "application/json" } }),
-        fetch("/api/analytics/action-campaigns", { headers: { Accept: "application/json" } }),
-        fetch("/api/analytics/funnels", { headers: { Accept: "application/json" } }),
-        fetch("/api/analytics/briefs", { headers: { Accept: "application/json" } }),
-        fetch("/api/analytics/ledger", { headers: { Accept: "application/json" } }),
-        fetch(`/api/analytics/overview?days=${days}`, { headers: { Accept: "application/json" } }),
-      ]);
-      if (![summaryResponse, intelligenceResponse, setupResponse, campaignsResponse, funnelsResponse, briefsResponse, ledgerResponse, overviewResponse].every((response) => response.ok)) throw new Error("One or more dashboard signals could not be read");
-      const [summary, signals, setupState, campaignState, funnelState, briefState, ledgerState, overviewState] = await Promise.all([summaryResponse.json(), intelligenceResponse.json(), setupResponse.json(), campaignsResponse.json(), funnelsResponse.json(), briefsResponse.json(), ledgerResponse.json(), overviewResponse.json()]);
-      setData(summary); setIntelligence(signals); setSetup(setupState); setActionCampaigns(campaignState.campaigns); setFunnels(funnelState.funnels); setBriefs(briefState.briefs); setLedger(ledgerState.events);
-      setOverviewBrief(overviewState);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Dashboard request failed"); }
-    finally { setLoading(false); }
+      const read = async <T,>(url: string): Promise<T> => {
+        const response = await fetch(url, { headers: { Accept: "application/json" }, signal: controller.signal });
+        if (!response.ok) throw new Error(`${url} could not be read (${response.status})`);
+        return response.json() as Promise<T>;
+      };
+      const summaryPromise = read<Dashboard>(`/api/analytics/summary?days=${days}`);
+      const tasks: Array<Promise<void>> = [];
+      if (property === "all" && view === "overview") tasks.push(
+        read<SetupData>("/api/analytics/setup").then(setSetup),
+        read<OverviewBriefData>(`/api/analytics/overview?days=${days}`).then(setOverviewBrief),
+      );
+      if (property === "all" && view === "actions") tasks.push(
+        read<{ campaigns: ActionCampaignData[] }>("/api/analytics/action-campaigns").then((result) => setActionCampaigns(result.campaigns)),
+      );
+      if (property === "all" && (view === "outcomes" || view === "intelligence")) tasks.push(
+        read<Intelligence>("/api/analytics/intelligence").then(setIntelligence),
+      );
+      if (property === "all" && view === "outcomes") tasks.push(
+        read<{ funnels: FunnelData[] }>("/api/analytics/funnels").then((result) => setFunnels(result.funnels)),
+        read<{ briefs: BriefData[] }>("/api/analytics/briefs").then((result) => setBriefs(result.briefs)),
+      );
+      if (property === "all" && view === "ledger") tasks.push(
+        read<{ events: LedgerEvent[] }>("/api/analytics/ledger").then((result) => setLedger(result.events)),
+      );
+      const [summary] = await Promise.all([summaryPromise, ...tasks]);
+      if (!controller.signal.aborted) setData(summary);
+    } catch (cause) {
+      if (!(cause instanceof DOMException && cause.name === "AbortError")) setError(cause instanceof Error ? cause.message : "Dashboard request failed");
+    } finally {
+      if (activeRequest.current === controller) { activeRequest.current = null; setLoading(false); }
+    }
   }
-  useEffect(() => { void load(); }, [days]);
+  useEffect(() => { void load(); return () => activeRequest.current?.abort(); }, [days, view, property]);
   useEffect(() => {
     const params = new URLSearchParams();
     params.set("days", String(days));
@@ -214,14 +233,14 @@ function DashboardApp() {
   }, []);
   useEffect(() => {
     if (property === "all") { setWorkspace(null); return; }
-    let cancelled = false;
+    const controller = new AbortController();
     setWorkspace(null);
-    fetch(`/api/analytics/properties/${encodeURIComponent(property)}/workspace?days=${days}`, { headers: { Accept: "application/json" } })
+    fetch(`/api/analytics/properties/${encodeURIComponent(property)}/workspace?days=${days}`, { headers: { Accept: "application/json" }, signal: controller.signal })
       .then(async (response) => { if (!response.ok) throw new Error("Property workspace could not be read"); return response.json(); })
-      .then((value) => { if (!cancelled) setWorkspace(value); })
-      .catch((cause) => { if (!cancelled) setError(cause instanceof Error ? cause.message : "Property workspace failed"); });
-    return () => { cancelled = true; };
-  }, [property, days, actionCampaigns.length, ledger.length]);
+      .then(setWorkspace)
+      .catch((cause) => { if (!(cause instanceof DOMException && cause.name === "AbortError")) setError(cause instanceof Error ? cause.message : "Property workspace failed"); });
+    return () => controller.abort();
+  }, [property, days]);
 
   function checkpoint() { history.pushState(null, "", window.location.href); }
   function focusContent() { requestAnimationFrame(() => document.getElementById("dashboard-content")?.focus()); }
@@ -286,14 +305,15 @@ function DashboardApp() {
           </div>
         </section>
 
-        {error && <div className="mb-5 flex items-center justify-between gap-3 rounded-lg border border-[#ff796f]/25 bg-[#ff796f]/8 px-4 py-3 text-sm text-[#ffc2bd]"><span>{error}</span><button onClick={() => setError("")} className="text-xs font-semibold">Dismiss</button></div>}
+        <div className="sr-only" role="status" aria-live="polite">{loading ? "Refreshing dashboard data" : "Dashboard data loaded"}</div>
+        {error && <div role="alert" aria-live="assertive" className="mb-5 flex items-center justify-between gap-3 rounded-lg border border-[#ff796f]/25 bg-[#ff796f]/8 px-4 py-3 text-sm text-[#ffc2bd]"><span>{error}</span><button onClick={() => setError("")} className="text-xs font-semibold">Dismiss</button></div>}
 
         {property === "all" && areaForView[view] !== "publish" && areaTabs[areaForView[view] as PrimaryArea].length > 1 && <nav className="mb-5 flex flex-wrap gap-1 border-b border-white/[.07]" aria-label={`${areaForView[view]} views`}>{areaTabs[areaForView[view] as PrimaryArea].map((tab) => <button key={tab.id} onClick={() => navigate(tab.id)} aria-current={view === tab.id ? "page" : undefined} className={`border-b-2 px-3 pb-3 pt-1 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#58e0c0]/50 ${view === tab.id ? "border-[#58e0c0] text-[#dff8f1]" : "border-transparent text-[#71807c] hover:text-[#c9d3d0]"}`}>{tab.label}</button>)}</nav>}
 
         <div id="dashboard-content" tabIndex={-1} className="outline-none">
           {property !== "all" ? workspace ? <PropertyWorkspace workspace={workspace} dashboard={filtered} section={workspaceSection} onSection={changeWorkspaceSection} onBack={closeProperty} onAudit={crawl} /> : <div className="grid min-h-64 place-items-center"><div className="size-8 animate-spin rounded-full border-2 border-white/10 border-t-[#58e0c0]" /></div> : <>
           {view !== "pulse" && <>
-            {setup && !setup.complete && <SetupGuide setup={setup} onRefresh={load} onAudit={crawl} />}
+            {view === "overview" && setup && !setup.complete && <SetupGuide setup={setup} onRefresh={load} onAudit={crawl} />}
             <section className="mb-6 grid gap-px overflow-hidden rounded-xl border border-white/[.08] bg-white/[.08] sm:grid-cols-2 xl:grid-cols-5">
               <Kpi label="Portfolio health" value={`${score}`} suffix="/100" note={`${filtered.totals.tracked}/${filtered.totals.properties} tracked · ${filtered.totals.averageSeoScore || 0} audit`} icon={IconSparkles} accent />
               <Kpi label="Pageviews" value={n(filtered.totals.pageviews)} note={trend(filtered.comparison.pageviewsQuality)} icon={IconActivity} state={filtered.comparison.pageviewsQuality.state} />
@@ -529,7 +549,7 @@ function ObservedRanks({ rows, properties }: { rows: Dashboard["rankVisibility"]
 
 function MixBars({ data }: { data: Dashboard }) {
   const total = data.deviceSummary.reduce((sum, row) => sum + row.visits, 0) || 1;
-  return <div className="space-y-5">{data.deviceSummary.map((row) => { const share = row.visits / total; return <div key={row.device}><div className="mb-2 flex items-center justify-between text-sm"><span>{row.device}</span><span className="tabular-nums text-[#81908c]">{pct(share)} · {row.visits}</span></div><div className="h-2 rounded-full bg-white/[.06]"><div className="h-2 rounded-full bg-[#58e0c0]" style={{ width: `${share * 100}%` }}/></div></div>})}</div>;
+  return <div className="space-y-5">{data.deviceSummary.map((row) => { const share = row.visits / total; return <div key={`${row.propertyId}:${row.device}`}><div className="mb-2 flex items-center justify-between text-sm"><span>{row.device}</span><span className="tabular-nums text-[#81908c]">{pct(share)} · {row.visits}</span></div><div className="h-2 rounded-full bg-white/[.06]"><div className="h-2 rounded-full bg-[#58e0c0]" style={{ width: `${share * 100}%` }}/></div></div>})}</div>;
 }
 
 function ActivityFeed({ data, expanded }: { data: Dashboard; expanded?: boolean }) {
