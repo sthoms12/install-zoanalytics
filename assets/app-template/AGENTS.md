@@ -41,4 +41,6 @@ Discovery reads `data/discovery-manifest.json` and writes `data/discovery-status
 
 `backend-lib/overview.ts` owns `/api/analytics/overview`. Only Ledger events with at least 20 observations and non-low confidence may appear as wins or regressions; keep all weaker evidence pending and use associative, never causal, language.
 
+Keep the five-area dashboard navigation and its nested tabs aligned with URL state (`area`, `tab`, `days`, `property`, `section`). Preserve legacy `view` bookmarks, browser back/forward restoration, keyboard focus movement, and the secondary Publish & data menu.
+
 `getActionCenter()` remains the atomic action source. `getActionCampaigns()` groups open actions into work campaigns, and `setActionCampaignState()` updates every child in one SQLite transaction. Keep source verification distinct from manually marking a campaign resolved.

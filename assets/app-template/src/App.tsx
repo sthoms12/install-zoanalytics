@@ -81,6 +81,7 @@ type Intelligence = {
 };
 
 type View = "overview" | "actions" | "traffic" | "content" | "seo" | "technical" | "outcomes" | "ledger" | "pulse" | "intelligence";
+type PrimaryArea = "overview" | "audience" | "visibility" | "improve" | "outcomes";
 type WorkspaceSection = "summary" | "audience" | "visibility" | "improve" | "outcomes";
 type PropertyWorkspaceData = {
   property: Property & { aliases: Array<{ url: string }>; sources: Array<{ provider: string; repository: string | null; repositoryUrl: string | null }> };
@@ -100,30 +101,42 @@ type OverviewBriefData = {
   setupHealth: Dashboard["dataQuality"]["counts"];
 };
 type OverviewEvent = { id: string; propertyId: string; propertyName: string; source: string; title: string; occurredAt: string; confidence: "low" | "medium" | "high"; sampleSize: number; direction: "win" | "regression" | null; metric: string | null; metricLabel: string | null; change: number; wording: string };
-const views: Array<{ id: View; label: string; icon: typeof IconRadar }> = [
-  { id: "overview", label: "Overview", icon: IconRadar },
-  { id: "actions", label: "Actions", icon: IconTargetArrow },
-  { id: "traffic", label: "Traffic", icon: IconChartAreaLine },
-  { id: "content", label: "Content", icon: IconFileAnalytics },
-  { id: "seo", label: "Search & links", icon: IconWorldSearch },
-  { id: "technical", label: "Site audit", icon: IconBrandSpeedtest },
-  { id: "outcomes", label: "Outcomes", icon: IconTrophy },
-  { id: "ledger", label: "Ledger", icon: IconHistory },
-  { id: "pulse", label: "Public Pulse", icon: IconEye },
-  { id: "intelligence", label: "Intelligence", icon: IconSparkles },
+const primaryAreas: Array<{ id: PrimaryArea; label: string; icon: typeof IconRadar; defaultView: View }> = [
+  { id: "overview", label: "Overview", icon: IconRadar, defaultView: "overview" },
+  { id: "audience", label: "Audience", icon: IconChartAreaLine, defaultView: "traffic" },
+  { id: "visibility", label: "Visibility", icon: IconWorldSearch, defaultView: "seo" },
+  { id: "improve", label: "Improve", icon: IconTargetArrow, defaultView: "actions" },
+  { id: "outcomes", label: "Outcomes", icon: IconTrophy, defaultView: "outcomes" },
 ];
+const areaTabs: Record<PrimaryArea, Array<{ id: View; label: string }>> = {
+  overview: [{ id: "overview", label: "Decision brief" }],
+  audience: [{ id: "traffic", label: "Traffic" }, { id: "content", label: "Content" }],
+  visibility: [{ id: "seo", label: "Search & links" }, { id: "technical", label: "Site audit" }],
+  improve: [{ id: "actions", label: "Work campaigns" }],
+  outcomes: [{ id: "outcomes", label: "Goals & funnels" }, { id: "ledger", label: "Change ledger" }],
+};
+const areaForView: Record<View, PrimaryArea | "publish"> = { overview: "overview", traffic: "audience", content: "audience", seo: "visibility", technical: "visibility", actions: "improve", outcomes: "outcomes", ledger: "outcomes", pulse: "publish", intelligence: "publish" };
+const validViews = new Set<View>(["overview", "actions", "traffic", "content", "seo", "technical", "outcomes", "ledger", "pulse", "intelligence"]);
+function viewFromParams(params: URLSearchParams): View {
+  const legacy = params.get("view") as View | null;
+  if (legacy && validViews.has(legacy)) return legacy;
+  const tab = params.get("tab") as View | null;
+  if (tab && validViews.has(tab)) return tab;
+  const area = params.get("area") as PrimaryArea | null;
+  return primaryAreas.find((item) => item.id === area)?.defaultView ?? "overview";
+}
 
 const viewCopy: Record<View, { eyebrow: string; title: string; subtitle: string }> = {
   overview: { eyebrow: "Overview", title: "See what earns attention.", subtitle: "Fix what quietly leaks it." },
-  actions: { eyebrow: "Actions", title: "Know exactly what to fix next.", subtitle: "Ranked by impact, confidence, and effort." },
-  traffic: { eyebrow: "Traffic", title: "Where your attention comes from.", subtitle: "Pageviews, visitors, and referrers, first-party." },
-  content: { eyebrow: "Content", title: "See which pages are working.", subtitle: "Opportunities and page-level detail, ranked." },
-  seo: { eyebrow: "Search & links", title: "Rankings, clicks, and backlinks.", subtitle: "Search Console signals and the public link graph." },
-  technical: { eyebrow: "Site audit", title: "Catch what's quietly broken.", subtitle: "Crawl findings and technical health, by severity." },
-  outcomes: { eyebrow: "Outcomes", title: "Turn traffic into results.", subtitle: "Goals, funnels, weekly briefs, and data exports." },
-  ledger: { eyebrow: "Ledger", title: "Every change, and what happened next.", subtitle: "Commits and edits lined up against real outcomes." },
-  pulse: { eyebrow: "Public Pulse", title: "Share proof, not private analytics.", subtitle: "Opt-in, sanitized metrics you can publish publicly." },
-  intelligence: { eyebrow: "Intelligence", title: "Deeper signals, every property.", subtitle: "Sessions, journeys, vitals, errors, and the link graph." },
+  actions: { eyebrow: "Improve · Work campaigns", title: "Know exactly what to fix next.", subtitle: "Ranked by impact, confidence, and effort." },
+  traffic: { eyebrow: "Audience · Traffic", title: "Where your attention comes from.", subtitle: "Pageviews, visitors, and referrers, first-party." },
+  content: { eyebrow: "Audience · Content", title: "See which pages are working.", subtitle: "Opportunities and page-level detail, ranked." },
+  seo: { eyebrow: "Visibility · Search & links", title: "Rankings, clicks, and backlinks.", subtitle: "Search Console signals and the public link graph." },
+  technical: { eyebrow: "Visibility · Site audit", title: "Catch what's quietly broken.", subtitle: "Crawl findings and technical health, by severity." },
+  outcomes: { eyebrow: "Outcomes · Goals & funnels", title: "Turn traffic into results.", subtitle: "Goals, funnels, weekly briefs, and data exports." },
+  ledger: { eyebrow: "Outcomes · Change ledger", title: "Every change, and what happened next.", subtitle: "Commits and edits lined up against real outcomes." },
+  pulse: { eyebrow: "Publish & data · Public Pulse", title: "Share proof, not private analytics.", subtitle: "Opt-in, sanitized metrics you can publish publicly." },
+  intelligence: { eyebrow: "Publish & data · Data operations", title: "Deeper signals, every property.", subtitle: "Sessions, journeys, vitals, errors, and the link graph." },
 };
 
 const n = (value: number) => new Intl.NumberFormat("en-US", { notation: value > 9999 ? "compact" : "standard", maximumFractionDigits: 1 }).format(value || 0);
@@ -146,11 +159,11 @@ function DashboardApp() {
   const [briefs, setBriefs] = useState<BriefData[]>([]);
   const [ledger, setLedger] = useState<LedgerEvent[]>([]);
   const [overviewBrief, setOverviewBrief] = useState<OverviewBriefData | null>(null);
-  const [view, setView] = useState<View>("overview");
+  const [view, setView] = useState<View>(viewFromParams(initialParams));
   const [property, setProperty] = useState(initialParams.get("property") ?? "all");
   const [workspaceSection, setWorkspaceSection] = useState<WorkspaceSection>((initialParams.get("section") as WorkspaceSection) || "summary");
   const [workspace, setWorkspace] = useState<PropertyWorkspaceData | null>(null);
-  const [days, setDays] = useState(30);
+  const [days, setDays] = useState(() => [7, 14, 30, 90].includes(Number(initialParams.get("days"))) ? Number(initialParams.get("days")) : 30);
   const [loading, setLoading] = useState(true);
   const [crawling, setCrawling] = useState(false);
   const [error, setError] = useState("");
@@ -177,11 +190,28 @@ function DashboardApp() {
   }
   useEffect(() => { void load(); }, [days]);
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (property === "all") { params.delete("property"); params.delete("section"); }
-    else { params.set("property", property); params.set("section", workspaceSection); }
+    const params = new URLSearchParams();
+    params.set("days", String(days));
+    if (property === "all") {
+      const area = areaForView[view];
+      params.set("area", area);
+      params.set("tab", view);
+    } else { params.set("property", property); params.set("section", workspaceSection); }
     history.replaceState(null, "", `${window.location.pathname}${params.size ? `?${params}` : ""}`);
-  }, [property, workspaceSection]);
+  }, [property, workspaceSection, view, days]);
+  useEffect(() => {
+    const restore = () => {
+      const params = new URLSearchParams(window.location.search);
+      const nextProperty = params.get("property") ?? "all";
+      setProperty(nextProperty);
+      setWorkspaceSection((params.get("section") as WorkspaceSection) || "summary");
+      setView(viewFromParams(params));
+      const nextDays = Number(params.get("days"));
+      if ([7, 14, 30, 90].includes(nextDays)) setDays(nextDays);
+    };
+    window.addEventListener("popstate", restore);
+    return () => window.removeEventListener("popstate", restore);
+  }, []);
   useEffect(() => {
     if (property === "all") { setWorkspace(null); return; }
     let cancelled = false;
@@ -193,9 +223,13 @@ function DashboardApp() {
     return () => { cancelled = true; };
   }, [property, days, actionCampaigns.length, ledger.length]);
 
-  function openProperty(id: string) { setProperty(id); setWorkspaceSection("summary"); }
-  function closeProperty() { setProperty("all"); setWorkspace(null); setView("overview"); }
-  function navigate(id: View) { setProperty("all"); setWorkspace(null); setView(id); }
+  function checkpoint() { history.pushState(null, "", window.location.href); }
+  function focusContent() { requestAnimationFrame(() => document.getElementById("dashboard-content")?.focus()); }
+  function openProperty(id: string) { checkpoint(); setProperty(id); setWorkspaceSection("summary"); focusContent(); }
+  function closeProperty() { checkpoint(); setProperty("all"); setWorkspace(null); setView("overview"); focusContent(); }
+  function navigate(id: View) { if (property === "all" && view === id) return; checkpoint(); setProperty("all"); setWorkspace(null); setView(id); focusContent(); }
+  function changeWorkspaceSection(section: WorkspaceSection) { if (workspaceSection === section) return; checkpoint(); setWorkspaceSection(section); focusContent(); }
+  function changeDays(value: number) { if (days === value) return; checkpoint(); setDays(value); focusContent(); }
 
   async function crawl() {
     setCrawling(true); setError("");
@@ -223,16 +257,18 @@ function DashboardApp() {
               <div className="grid size-8 place-items-center rounded-[9px] bg-[#58e0c0] text-[#07110e]"><IconRadar size={19} stroke={2.2} /></div>
               <div><p className="text-sm font-semibold tracking-[-.02em]">ZoAnalytics</p><p className="hidden text-[10px] text-[#73827e] sm:block">PRIVATE INTELLIGENCE</p></div>
             </div>
-            <nav className="za-scrollbar-none hidden min-w-0 flex-1 items-center gap-1 overflow-x-auto lg:flex" aria-label="Dashboard views">
-              {views.map(({ id, label, icon: Icon }) => <NavButton key={id} active={property === "all" && view === id} onClick={() => navigate(id)} icon={Icon} label={label} />)}
+            <nav className="za-scrollbar-none hidden min-w-0 flex-1 items-center justify-center gap-1 overflow-x-auto lg:flex" aria-label="Primary dashboard sections">
+              {primaryAreas.map(({ id, label, icon: Icon, defaultView }) => <NavButton key={id} active={property === "all" && areaForView[view] === id} onClick={() => navigate(defaultView)} icon={Icon} label={label} />)}
+              <PublishDataMenu view={view} navigate={navigate} />
             </nav>
             <div className="flex items-center gap-2">
               <button onClick={() => void load()} disabled={loading} className="za-icon-button" aria-label="Refresh dashboard"><IconRefresh size={17} className={loading ? "animate-spin" : ""} /></button>
               <button onClick={() => void crawl()} disabled={crawling} className="za-primary-button"><IconBolt size={16} className={crawling ? "animate-pulse" : ""} /><span>{crawling ? "Crawling" : "Run audit"}</span></button>
             </div>
           </div>
-          <nav className="za-scrollbar-none -mx-1 flex gap-1 overflow-x-auto pb-2 lg:hidden" aria-label="Dashboard views">
-            {views.map(({ id, label, icon: Icon }) => <NavButton key={id} active={property === "all" && view === id} onClick={() => navigate(id)} icon={Icon} label={label} />)}
+          <nav className="za-scrollbar-none -mx-1 flex gap-1 overflow-x-auto pb-2 lg:hidden" aria-label="Primary dashboard sections">
+            {primaryAreas.map(({ id, label, icon: Icon, defaultView }) => <NavButton key={id} active={property === "all" && areaForView[view] === id} onClick={() => navigate(defaultView)} icon={Icon} label={label} />)}
+            <PublishDataMenu view={view} navigate={navigate} />
           </nav>
         </header>
 
@@ -245,15 +281,17 @@ function DashboardApp() {
             <span className="text-[10px] font-semibold uppercase tracking-[.16em] text-[#65736f]">Scope & period</span>
             <div className="za-scrollbar-none flex max-w-full gap-2 overflow-x-auto pb-1">
               <div className="relative"><IconFilter className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#71807c]" size={15}/><select aria-label="Property scope" value={property} onChange={(event) => event.target.value === "all" ? closeProperty() : openProperty(event.target.value)} className="h-10 min-w-48 appearance-none rounded-lg border border-white/10 bg-white/[.045] pl-9 pr-9 text-sm font-medium text-[#dbe6e3] outline-none transition focus:border-[#58e0c0]/60 focus:ring-2 focus:ring-[#58e0c0]/15"><option value="all">All properties</option>{data.properties.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><IconChevronRight className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rotate-90 text-[#71807c]" size={14}/></div>
-              <div className="flex rounded-lg border border-white/10 bg-white/[.025] p-1">{[7,14,30,90].map((value) => <button key={value} onClick={() => setDays(value)} className={`rounded-md px-2.5 text-xs font-semibold tabular-nums transition ${days === value ? "bg-[#58e0c0] text-[#07110e]" : "text-[#71807c] hover:text-white"}`}>{value}d</button>)}</div>
+              <div className="flex rounded-lg border border-white/10 bg-white/[.025] p-1">{[7,14,30,90].map((value) => <button key={value} onClick={() => changeDays(value)} className={`rounded-md px-2.5 text-xs font-semibold tabular-nums transition ${days === value ? "bg-[#58e0c0] text-[#07110e]" : "text-[#71807c] hover:text-white"}`}>{value}d</button>)}</div>
             </div>
           </div>
         </section>
 
         {error && <div className="mb-5 flex items-center justify-between gap-3 rounded-lg border border-[#ff796f]/25 bg-[#ff796f]/8 px-4 py-3 text-sm text-[#ffc2bd]"><span>{error}</span><button onClick={() => setError("")} className="text-xs font-semibold">Dismiss</button></div>}
 
-        <div id="dashboard-content">
-          {property !== "all" ? workspace ? <PropertyWorkspace workspace={workspace} dashboard={filtered} section={workspaceSection} onSection={setWorkspaceSection} onBack={closeProperty} onAudit={crawl} /> : <div className="grid min-h-64 place-items-center"><div className="size-8 animate-spin rounded-full border-2 border-white/10 border-t-[#58e0c0]" /></div> : <>
+        {property === "all" && areaForView[view] !== "publish" && areaTabs[areaForView[view] as PrimaryArea].length > 1 && <nav className="mb-5 flex flex-wrap gap-1 border-b border-white/[.07]" aria-label={`${areaForView[view]} views`}>{areaTabs[areaForView[view] as PrimaryArea].map((tab) => <button key={tab.id} onClick={() => navigate(tab.id)} aria-current={view === tab.id ? "page" : undefined} className={`border-b-2 px-3 pb-3 pt-1 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#58e0c0]/50 ${view === tab.id ? "border-[#58e0c0] text-[#dff8f1]" : "border-transparent text-[#71807c] hover:text-[#c9d3d0]"}`}>{tab.label}</button>)}</nav>}
+
+        <div id="dashboard-content" tabIndex={-1} className="outline-none">
+          {property !== "all" ? workspace ? <PropertyWorkspace workspace={workspace} dashboard={filtered} section={workspaceSection} onSection={changeWorkspaceSection} onBack={closeProperty} onAudit={crawl} /> : <div className="grid min-h-64 place-items-center"><div className="size-8 animate-spin rounded-full border-2 border-white/10 border-t-[#58e0c0]" /></div> : <>
           {view !== "pulse" && <>
             {setup && !setup.complete && <SetupGuide setup={setup} onRefresh={load} onAudit={crawl} />}
             <section className="mb-6 grid gap-px overflow-hidden rounded-xl border border-white/[.08] bg-white/[.08] sm:grid-cols-2 xl:grid-cols-5">
@@ -518,6 +556,17 @@ function FindingRow({ finding, properties }: { finding: Dashboard["seoFindings"]
 function Health({ score }: { score: number }) { const tone = score >= 90 ? "text-[#70d9b9]" : score >= 70 ? "text-[#efc86b]" : "text-[#ff8178]"; return <span className={`text-sm font-semibold tabular-nums ${tone}`}>{score || "—"}</span>; }
 function ScoreRing({ score }: { score: number }) { return <div className="relative grid size-40 place-items-center rounded-full" style={{ background: `conic-gradient(#58e0c0 ${score * 3.6}deg, rgba(255,255,255,.06) 0)` }}><div className="grid size-[138px] place-items-center rounded-full bg-[#0d1315]"><div className="text-center"><p className="text-5xl font-semibold tracking-[-.06em] tabular-nums">{score || 0}</p><p className="mt-1 text-[10px] uppercase tracking-[.15em] text-[#65736f]">SEO health</p></div></div></div>; }
 function NavButton({ active, onClick, icon: Icon, label }: { active: boolean; onClick: () => void; icon: typeof IconRadar; label: string }) { return <button onClick={onClick} className={`flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-xs font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#58e0c0]/50 ${active ? "bg-white/[.08] text-white" : "text-[#71807c] hover:bg-white/[.04] hover:text-[#c9d3d0]"}`}><Icon size={15}/>{label}</button>; }
+
+function PublishDataMenu({ view, navigate }: { view: View; navigate: (view: View) => void }) {
+  const active = areaForView[view] === "publish";
+  return <details className="group relative shrink-0">
+    <summary className={`flex cursor-pointer list-none items-center gap-2 rounded-md px-3 py-2 text-xs font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#58e0c0]/50 [&::-webkit-details-marker]:hidden ${active ? "bg-white/[.08] text-white" : "text-[#71807c] hover:bg-white/[.04] hover:text-[#c9d3d0]"}`}><IconSparkles size={15}/>Publish & data<IconChevronRight size={12} className="rotate-90 transition group-open:-rotate-90"/></summary>
+    <div className="fixed right-3 top-[7.25rem] z-40 mt-2 w-52 overflow-hidden rounded-lg border border-white/[.1] bg-[#11191b] p-1.5 shadow-[0_18px_50px_rgba(0,8,8,.45)] lg:absolute lg:right-0 lg:top-auto">
+      <button onClick={(event) => { navigate("pulse"); event.currentTarget.closest("details")?.removeAttribute("open"); }} className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-xs transition ${view === "pulse" ? "bg-[#58e0c0]/10 text-[#70d9b9]" : "text-[#a9b6b2] hover:bg-white/[.05]"}`}><IconEye size={15}/><span><strong className="block font-semibold">Public Pulse</strong><span className="mt-0.5 block text-[10px] text-[#61706c]">Publish selected proof</span></span></button>
+      <button onClick={(event) => { navigate("intelligence"); event.currentTarget.closest("details")?.removeAttribute("open"); }} className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-xs transition ${view === "intelligence" ? "bg-[#58e0c0]/10 text-[#70d9b9]" : "text-[#a9b6b2] hover:bg-white/[.05]"}`}><IconSparkles size={15}/><span><strong className="block font-semibold">Data operations</strong><span className="mt-0.5 block text-[10px] text-[#61706c]">Sources, discovery, exports</span></span></button>
+    </div>
+  </details>;
+}
 function Empty({ icon: Icon, title, text }: { icon: typeof IconRadar; title: string; text: string }) { return <div className="grid min-h-40 place-items-center rounded-lg border border-dashed border-white/10 p-5 text-center"><div><Icon className="mx-auto text-[#54625f]" size={22}/><p className="mt-3 text-sm font-medium text-[#bdc8c5]">{title}</p><p className="mx-auto mt-1 max-w-xs text-xs leading-5 text-[#65736f]">{text}</p></div></div>; }
 function LoadingState({ error, retry }: { error: string; retry: () => void }) { return <main className="grid min-h-screen place-items-center bg-[#090d0f] text-[#e7efed]"><div className="text-center">{error ? <><IconAlertTriangle className="mx-auto text-[#ff8178]"/><p className="mt-3 text-sm">{error}</p><button onClick={retry} className="za-primary-button mx-auto mt-4">Retry</button></> : <><div className="mx-auto size-8 animate-spin rounded-full border-2 border-white/10 border-t-[#58e0c0]"/><p className="mt-4 text-xs uppercase tracking-[.15em] text-[#65736f]">Reading signals</p></>}</div></main>; }
 function propertyName(properties: Property[], id: string) { return properties.find((item) => item.id === id)?.name ?? id; }
