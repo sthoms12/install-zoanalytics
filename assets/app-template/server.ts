@@ -10,6 +10,7 @@ import { createFunnel, exportRows, getActionCampaigns, getActionCenter, getBrief
 import { addExternalProperty, discoverExternalProperties, getExternalSources } from "./backend-lib/external";
 import { getPublicPulse, listPulseConfig, pulsePageHtml, refreshPulseSnapshot, updatePulseConfig } from "./backend-lib/pulse";
 import { deleteChangeEvent, getLedger, logManualChangeEvent } from "./backend-lib/ledger";
+import { getOverviewBrief } from "./backend-lib/overview";
 import { applyFix, getFixCapability, listFixes, previewFix, revertFix } from "./backend-lib/fixes";
 import { startWeeklyRefreshScheduler } from "./backend-lib/scheduler";
 import { getPropertyWorkspace } from "./backend-lib/workspace";
@@ -60,6 +61,7 @@ app.get("/api/analytics/summary", (c) => {
   const days = Number.parseInt(c.req.query("days") ?? "30", 10);
   return c.json(getDashboard(days));
 });
+app.get("/api/analytics/overview", async (c) => c.json(await getOverviewBrief(Number(c.req.query("days") || 30))));
 const inferredOwnerHandle = getProperties().map((item) => item.url.match(/^[a-z]+:\/\/[^/]+-([a-z0-9-]+)\.zocomputer\.io/i)?.[1]).find(Boolean);
 const ownerHandle = process.env.ZO_OWNER_HANDLE?.trim() || inferredOwnerHandle;
 const collectorOrigin = process.env.ZOANALYTICS_PUBLIC_ORIGIN

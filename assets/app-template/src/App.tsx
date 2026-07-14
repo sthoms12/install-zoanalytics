@@ -91,6 +91,15 @@ type PropertyWorkspaceData = {
   improve: { status: string; error: string | null; data: { campaigns: ActionCampaignData[]; opportunities: Dashboard["opportunityPages"]; errors: Intelligence["errors"] } };
   outcomes: { status: string; error: string | null; data: { goals: Intelligence["goals"]; funnels: FunnelData[]; ledger: LedgerEvent[]; conversions: number } };
 };
+type OverviewBriefData = {
+  generatedAt: string; range: { days: number; label: string };
+  portfolio: { pageviews: number; visitors: number; activeProperties: number; properties: number; pageviewsComparison: ComparisonQuality; visitorsComparison: ComparisonQuality };
+  wins: OverviewEvent[]; regressions: OverviewEvent[]; pending: OverviewEvent[];
+  campaigns: ActionCampaignData[];
+  qualityExceptions: Array<{ propertyId: string; propertyName: string; source: string; state: DataQualitySignal["state"]; label: string; explanation: string; observedAt: string | null; ageMinutes: number | null }>;
+  setupHealth: Dashboard["dataQuality"]["counts"];
+};
+type OverviewEvent = { id: string; propertyId: string; propertyName: string; source: string; title: string; occurredAt: string; confidence: "low" | "medium" | "high"; sampleSize: number; direction: "win" | "regression" | null; metric: string | null; metricLabel: string | null; change: number; wording: string };
 const views: Array<{ id: View; label: string; icon: typeof IconRadar }> = [
   { id: "overview", label: "Overview", icon: IconRadar },
   { id: "actions", label: "Actions", icon: IconTargetArrow },
@@ -136,6 +145,7 @@ function DashboardApp() {
   const [funnels, setFunnels] = useState<FunnelData[]>([]);
   const [briefs, setBriefs] = useState<BriefData[]>([]);
   const [ledger, setLedger] = useState<LedgerEvent[]>([]);
+  const [overviewBrief, setOverviewBrief] = useState<OverviewBriefData | null>(null);
   const [view, setView] = useState<View>("overview");
   const [property, setProperty] = useState(initialParams.get("property") ?? "all");
   const [workspaceSection, setWorkspaceSection] = useState<WorkspaceSection>((initialParams.get("section") as WorkspaceSection) || "summary");
@@ -148,7 +158,7 @@ function DashboardApp() {
   async function load() {
     setLoading(true); setError("");
     try {
-      const [summaryResponse, intelligenceResponse, setupResponse, campaignsResponse, funnelsResponse, briefsResponse, ledgerResponse] = await Promise.all([
+      const [summaryResponse, intelligenceResponse, setupResponse, campaignsResponse, funnelsResponse, briefsResponse, ledgerResponse, overviewResponse] = await Promise.all([
         fetch(`/api/analytics/summary?days=${days}`, { headers: { Accept: "application/json" } }),
         fetch("/api/analytics/intelligence", { headers: { Accept: "application/json" } }),
         fetch("/api/analytics/setup", { headers: { Accept: "application/json" } }),
@@ -156,10 +166,12 @@ function DashboardApp() {
         fetch("/api/analytics/funnels", { headers: { Accept: "application/json" } }),
         fetch("/api/analytics/briefs", { headers: { Accept: "application/json" } }),
         fetch("/api/analytics/ledger", { headers: { Accept: "application/json" } }),
+        fetch(`/api/analytics/overview?days=${days}`, { headers: { Accept: "application/json" } }),
       ]);
-      if (![summaryResponse, intelligenceResponse, setupResponse, campaignsResponse, funnelsResponse, briefsResponse, ledgerResponse].every((response) => response.ok)) throw new Error("One or more dashboard signals could not be read");
-      const [summary, signals, setupState, campaignState, funnelState, briefState, ledgerState] = await Promise.all([summaryResponse.json(), intelligenceResponse.json(), setupResponse.json(), campaignsResponse.json(), funnelsResponse.json(), briefsResponse.json(), ledgerResponse.json()]);
+      if (![summaryResponse, intelligenceResponse, setupResponse, campaignsResponse, funnelsResponse, briefsResponse, ledgerResponse, overviewResponse].every((response) => response.ok)) throw new Error("One or more dashboard signals could not be read");
+      const [summary, signals, setupState, campaignState, funnelState, briefState, ledgerState, overviewState] = await Promise.all([summaryResponse.json(), intelligenceResponse.json(), setupResponse.json(), campaignsResponse.json(), funnelsResponse.json(), briefsResponse.json(), ledgerResponse.json(), overviewResponse.json()]);
       setData(summary); setIntelligence(signals); setSetup(setupState); setActionCampaigns(campaignState.campaigns); setFunnels(funnelState.funnels); setBriefs(briefState.briefs); setLedger(ledgerState.events);
+      setOverviewBrief(overviewState);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Dashboard request failed"); }
     finally { setLoading(false); }
   }
@@ -243,7 +255,7 @@ function DashboardApp() {
         <div id="dashboard-content">
           {property !== "all" ? workspace ? <PropertyWorkspace workspace={workspace} dashboard={filtered} section={workspaceSection} onSection={setWorkspaceSection} onBack={closeProperty} onAudit={crawl} /> : <div className="grid min-h-64 place-items-center"><div className="size-8 animate-spin rounded-full border-2 border-white/10 border-t-[#58e0c0]" /></div> : <>
           {view !== "pulse" && <>
-            {setup && <SetupGuide setup={setup} onRefresh={load} onAudit={crawl} />}
+            {setup && !setup.complete && <SetupGuide setup={setup} onRefresh={load} onAudit={crawl} />}
             <section className="mb-6 grid gap-px overflow-hidden rounded-xl border border-white/[.08] bg-white/[.08] sm:grid-cols-2 xl:grid-cols-5">
               <Kpi label="Portfolio health" value={`${score}`} suffix="/100" note={`${filtered.totals.tracked}/${filtered.totals.properties} tracked · ${filtered.totals.averageSeoScore || 0} audit`} icon={IconSparkles} accent />
               <Kpi label="Pageviews" value={n(filtered.totals.pageviews)} note={trend(filtered.comparison.pageviewsQuality)} icon={IconActivity} state={filtered.comparison.pageviewsQuality.state} />
@@ -254,7 +266,7 @@ function DashboardApp() {
             <SourceStrip data={filtered} />
           </>}
 
-          {view === "overview" && <Overview data={filtered} name={name} onSelectProperty={openProperty} />}
+          {view === "overview" && <Overview data={filtered} brief={overviewBrief} name={name} onSelectProperty={openProperty} onOpenActions={() => navigate("actions")} />}
           {view === "actions" && <ActionCenter campaigns={actionCampaigns.filter((item) => property === "all" || item.propertyId === property)} properties={data.properties} onRefresh={load} />}
           {view === "traffic" && <Traffic data={filtered} />}
           {view === "content" && <Content data={filtered} />}
@@ -300,28 +312,31 @@ function WorkspaceSignal({ label, signal }: { label: string; signal: DataQuality
   return <div className="bg-[#0b1113] p-4"><p className="text-[9px] font-semibold uppercase tracking-[.14em] text-[#60706b]">{label}</p><div className="mt-2">{signal ? <FreshnessLabel signal={signal}/> : <span className="text-xs text-[#71807c]">Unavailable</span>}</div><p className="mt-2 line-clamp-2 text-[10px] leading-4 text-[#61706c]">{signal?.explanation ?? "No source state is available."}</p></div>;
 }
 
-function Overview({ data, name, onSelectProperty }: { data: Dashboard; name: string; onSelectProperty: (id: string) => void }) {
-  const properties = data.properties;
+function Overview({ data, brief, name, onSelectProperty, onOpenActions }: { data: Dashboard; brief: OverviewBriefData | null; name: string; onSelectProperty: (id: string) => void; onOpenActions: () => void }) {
   return <div className="space-y-4">
+    <section className="grid gap-px overflow-hidden rounded-xl border border-white/[.08] bg-white/[.08] sm:grid-cols-2 xl:grid-cols-4">
+      <Kpi label="Portfolio attention" value={n(brief?.portfolio.pageviews ?? data.totals.pageviews)} note={trend(brief?.portfolio.pageviewsComparison ?? data.comparison.pageviewsQuality)} icon={IconActivity} accent />
+      <Kpi label="Visitors" value={n(brief?.portfolio.visitors ?? data.totals.visitors)} note={trend(brief?.portfolio.visitorsComparison ?? data.comparison.visitorsQuality)} icon={IconSearch} />
+      <Kpi label="Properties earning attention" value={n(brief?.portfolio.activeProperties ?? data.totals.activeProperties)} note={`of ${brief?.portfolio.properties ?? data.totals.properties} properties`} icon={IconGlobe} />
+      <Kpi label="Decision-ready changes" value={n((brief?.wins.length ?? 0) + (brief?.regressions.length ?? 0))} note={`${brief?.pending.length ?? 0} still gathering evidence`} icon={IconHistory} />
+    </section>
     <DataQualitySummary data={data} />
-    <section className="grid gap-4 xl:grid-cols-[1.55fr_.75fr]">
-      <Panel title="Attention over time" eyebrow={`${name} · 14 days`} icon={IconChartAreaLine}>
-        <TrafficChart data={data.trend} />
-      </Panel>
-      <Panel title="What needs you" eyebrow={`${data.actionItems.length} prioritized actions`} icon={IconTargetArrow}>
-        <div className="space-y-1">{data.actionItems.slice(0, 6).map((item, index) => <ActionRow key={`${item.pageUrl}-${index}`} item={item} properties={properties} />)}{!data.actionItems.length && <Empty icon={IconCheck} title="Everything looks clean" text="No open audit findings in this scope." />}</div>
-      </Panel>
+    <section className="grid gap-4 xl:grid-cols-2">
+      <OutcomeBrief title="Recent wins" eyebrow="Observed after changes · confidence gated" events={brief?.wins ?? []} tone="win" onSelectProperty={onSelectProperty} />
+      <OutcomeBrief title="Recent regressions" eyebrow="Observed after changes · confidence gated" events={brief?.regressions ?? []} tone="regression" onSelectProperty={onSelectProperty} />
     </section>
     <section className="grid gap-4 xl:grid-cols-[1.1fr_.9fr]">
-      <Panel title="Property pulse" eyebrow="Traffic, health and recency" icon={IconGlobe}><PropertyTable data={data} onSelect={onSelectProperty} /></Panel>
-      <Panel title="Content opportunities" eyebrow="Highest potential first" icon={IconSparkles}><OpportunityList data={data} /></Panel>
+      <Panel title="Top work campaigns" eyebrow="The next three decisions" icon={IconTargetArrow}><div className="space-y-2">{(brief?.campaigns ?? []).map((campaign) => <button key={campaign.key} onClick={onOpenActions} className="flex w-full items-center justify-between gap-4 rounded-lg border border-white/[.06] bg-white/[.025] p-3 text-left transition hover:border-[#58e0c0]/25 hover:bg-[#58e0c0]/[.035]"><div><p className="text-sm font-medium text-[#dce6e3]">{campaign.title}</p><p className="mt-1 text-[11px] text-[#71807c]">{propertyName(data.properties, campaign.propertyId)} · {campaign.affectedPages} affected · {campaign.fixability.replace("-", " ")}</p></div><IconChevronRight size={16} className="shrink-0 text-[#58e0c0]" /></button>)}{!brief?.campaigns.length && <Empty icon={IconCheck} title="No open campaigns" text="The portfolio has no open grouped work campaigns." />}</div></Panel>
+      <Panel title="Changes gathering evidence" eyebrow="Not yet labeled a win or regression" icon={IconHistory}><div className="space-y-2">{(brief?.pending ?? []).slice(0, 4).map((event) => <button key={event.id} onClick={() => onSelectProperty(event.propertyId)} className="w-full rounded-lg border border-white/[.06] bg-white/[.02] p-3 text-left"><p className="text-sm text-[#dce6e3]">{event.title}</p><p className="mt-1 text-[10px] text-[#71807c]">{event.propertyName} · {event.sampleSize}/20 observations · {relativeTime(event.occurredAt)}</p></button>)}{!brief?.pending.length && <Empty icon={IconHistory} title="No pending changes" text="New changes will wait here until enough post-change evidence exists." />}</div></Panel>
     </section>
-    <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-      <Panel title="Acquisition" eyebrow="Observed traffic sources" icon={IconExternalLink}><RankedRows rows={data.referrerSummary.map((row) => ({ title: row.source, label: propertyName(properties, row.propertyId), value: row.visits, suffix: "visits" }))} /></Panel>
-      <Panel title="Devices" eyebrow="First-party visitor mix" icon={IconDeviceDesktopAnalytics}><MixBars data={data} /></Panel>
-      <Panel title={data.dataQuality.sources.traffic.state === "live" ? "Live activity" : "Recent activity"} eyebrow={data.dataQuality.sources.traffic.state === "live" ? "Visits within the live window" : `Latest signal ${relativeTime(data.freshness.traffic)}`} icon={IconActivity}><ActivityFeed data={data} /></Panel>
-    </section>
+    <Panel title="Property portfolio" eyebrow="Traffic, health and recency" icon={IconGlobe}><PropertyTable data={data} onSelect={onSelectProperty} /></Panel>
+    <Panel title="Supporting traffic trend" eyebrow={`${name} · ${data.range.label}`} icon={IconChartAreaLine}><TrafficChart data={data.trend} /></Panel>
   </div>;
+}
+
+function OutcomeBrief({ title, eyebrow, events, tone, onSelectProperty }: { title: string; eyebrow: string; events: OverviewEvent[]; tone: "win" | "regression"; onSelectProperty: (id: string) => void }) {
+  const Icon = tone === "win" ? IconTrophy : IconAlertTriangle;
+  return <Panel title={title} eyebrow={eyebrow} icon={Icon}><div className="space-y-2">{events.map((event) => <button key={event.id} onClick={() => onSelectProperty(event.propertyId)} className="w-full rounded-lg border border-white/[.06] bg-white/[.02] p-3 text-left transition hover:border-white/[.12]"><div className="flex items-start justify-between gap-4"><div><p className="text-sm font-medium text-[#dce6e3]">{event.title}</p><p className="mt-1 text-[11px] text-[#71807c]">{event.propertyName} · {event.wording}</p></div><span className={`shrink-0 text-sm font-semibold tabular-nums ${tone === "win" ? "text-[#70d9b9]" : "text-[#ff8178]"}`}>{event.change > 0 ? "+" : ""}{event.change}</span></div><p className="mt-2 text-[9px] uppercase tracking-wider text-[#596762]">{event.confidence} confidence · {event.sampleSize} observations · followed this change</p></button>)}{!events.length && <Empty icon={Icon} title={tone === "win" ? "No decision-ready wins yet" : "No decision-ready regressions"} text={tone === "win" ? "Changes appear here only after they meet the confidence and sample thresholds." : "No recent change meets the evidence threshold for a regression."} />}</div></Panel>;
 }
 
 function DataQualitySummary({ data }: { data: Dashboard }) {

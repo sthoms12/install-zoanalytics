@@ -39,4 +39,6 @@ Discovery reads `data/discovery-manifest.json` and writes `data/discovery-status
 
 `backend-lib/workspace.ts` owns the property-centered aggregate. Keep Summary, Audience, Visibility, Improve, and Outcomes independently readable with section-level status/error metadata, and preserve property plus section in the dashboard URL.
 
+`backend-lib/overview.ts` owns `/api/analytics/overview`. Only Ledger events with at least 20 observations and non-low confidence may appear as wins or regressions; keep all weaker evidence pending and use associative, never causal, language.
+
 `getActionCenter()` remains the atomic action source. `getActionCampaigns()` groups open actions into work campaigns, and `setActionCampaignState()` updates every child in one SQLite transaction. Keep source verification distinct from manually marking a campaign resolved.

@@ -26,6 +26,7 @@ No paid analytics or SEO API is required.
 - The Safe Fix Laboratory previews, applies, and reverts title, description, canonical, and noindex fixes directly on an eligible property's `index.html`, skipping properties with custom per-route SEO rendering.
 - A built-in weekly scheduler re-crawls properties and refreshes Common Crawl, Ahrefs, and intelligence data every Monday with no AI or external cron involved.
 - Every source and property reports an explicit data state: live, current, stale, missing, unverified, or insufficient sample. Zero-baseline comparisons use absolute explanations instead of invented percentages, and low-sample Web Vitals and Ledger outcomes remain visibly pending.
+- The Overview is a decision brief: portfolio movement, confidence-gated wins and regressions, changes still gathering evidence, top work campaigns, trust exceptions, and direct paths into property workspaces.
 
 ## Public-only discovery
 
