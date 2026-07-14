@@ -19,4 +19,4 @@ Run bun run discover. If Cloudflare is connected, run bun run external-discovery
 If discovery or maintenance fails, report one concise error with the failing stage. Otherwise report only counts for accepted, skipped, tracked, and missing-tracker surfaces. Do not expose visitor data in the automation summary.
 ```
 
-Recommended cadence: daily at 3:15 AM local time. Schedule `bun run common-crawl-sync` weekly at a low-traffic time.
+Recommended cadence: daily at 3:15 AM local time. Do not also schedule `bun run common-crawl-sync`, `bun run ahrefs-sync`, or a second `bun run crawl` pass outside this automation — the installed app already runs those weekly on its own via `backend-lib/scheduler.ts`, with no agent or AI involved.

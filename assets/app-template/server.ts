@@ -9,6 +9,9 @@ import { addCompetitor, addRankKeyword, createGoal, createWeeklyReport, discover
 import { createFunnel, exportRows, getActionCenter, getBriefs, getPageDetail, getSetupStatus, listFunnels, rowsToCsv, setActionState, verifyTracker } from "./backend-lib/product";
 import { addExternalProperty, discoverExternalProperties, getExternalSources } from "./backend-lib/external";
 import { getPublicPulse, listPulseConfig, pulsePageHtml, refreshPulseSnapshot, updatePulseConfig } from "./backend-lib/pulse";
+import { deleteChangeEvent, getLedger, logManualChangeEvent } from "./backend-lib/ledger";
+import { applyFix, getFixCapability, listFixes, previewFix, revertFix } from "./backend-lib/fixes";
+import { startWeeklyRefreshScheduler } from "./backend-lib/scheduler";
 
 type Mode = "development" | "production";
 const app = new Hono();
@@ -80,6 +83,29 @@ app.post("/api/analytics/funnels", async (c) => {
   try { return c.json(createFunnel(body), 201); } catch (error) { return c.json({ error: error instanceof Error ? error.message : "Invalid funnel" }, 400); }
 });
 app.get("/api/analytics/briefs", (c) => c.json({ briefs: getBriefs() }));
+app.get("/api/analytics/ledger", async (c) => c.json({ events: await getLedger() }));
+app.post("/api/analytics/ledger", async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  try { return c.json(logManualChangeEvent(body), 201); }
+  catch (error) { return c.json({ error: error instanceof Error ? error.message : "Could not log change" }, 400); }
+});
+app.delete("/api/analytics/ledger/:id", (c) => c.json(deleteChangeEvent(c.req.param("id"))));
+app.get("/api/analytics/fixes", (c) => c.json({ fixes: listFixes(c.req.query("propertyId") ?? undefined) }));
+app.get("/api/analytics/fixes/capability/:propertyId", async (c) => c.json(await getFixCapability(c.req.param("propertyId"))));
+app.post("/api/analytics/fixes/preview", async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  try { return c.json(await previewFix(body.propertyId, body.code, body.value)); }
+  catch (error) { return c.json({ error: error instanceof Error ? error.message : "Could not preview this fix" }, 400); }
+});
+app.post("/api/analytics/fixes/apply", async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  try { return c.json(await applyFix(body.propertyId, body.code, body.value, body.actionKey), 201); }
+  catch (error) { return c.json({ error: error instanceof Error ? error.message : "Could not apply this fix" }, 400); }
+});
+app.post("/api/analytics/fixes/:id/revert", async (c) => {
+  try { return c.json(await revertFix(c.req.param("id"))); }
+  catch (error) { return c.json({ error: error instanceof Error ? error.message : "Could not revert this fix" }, 400); }
+});
 app.get("/api/analytics/export/:dataset", (c) => {
   const dataset = c.req.param("dataset").replace(/\.csv$/i, ""); const rows = exportRows(dataset);
   if (!rows) return c.json({ error: "Unknown export dataset" }, 404);
@@ -259,6 +285,8 @@ if (collectorOnly) {
 } else {
   await configureDevelopment(app);
 }
+
+if (!collectorOnly) startWeeklyRefreshScheduler();
 
 const port = process.env.PORT
   ? parseInt(process.env.PORT, 10)

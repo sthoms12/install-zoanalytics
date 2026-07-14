@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { IconBolt, IconCheck, IconChevronRight, IconDownload, IconExternalLink, IconEye, IconFileAnalytics, IconFlag, IconRefresh, IconRoute, IconShieldLock, IconTargetArrow } from "@tabler/icons-react";
+import { IconArrowBackUp, IconBolt, IconCheck, IconChevronRight, IconDownload, IconExternalLink, IconEye, IconFileAnalytics, IconFlag, IconGitBranch, IconHistory, IconPlus, IconRefresh, IconRoute, IconShieldLock, IconTargetArrow, IconTrash } from "@tabler/icons-react";
+import { SampleWarning } from "@/components/data-state";
 
 export type SetupData = {
   appVersion: string; complete: boolean; completedSteps: number;
@@ -10,7 +11,12 @@ export type SetupData = {
 export type ActionData = {
   key: string; propertyId: string; pageUrl: string; category: string; severity: string; title: string;
   why: string; evidence: string; fix: string; impact: number; confidence: number; effort: number; priority: number;
+  fixCode: string | null;
 };
+
+export type SafeFix = { id: string; propertyId: string; actionKey: string | null; code: string; filePath: string; status: "applied" | "reverted"; appliedAt: string; revertedAt: string | null };
+
+type FixPreview = { propertyId: string; code: string; filePath: string; before: string; after: string; changed: boolean; needsValue: boolean; suggestedValue: string | null };
 
 export type FunnelData = {
   id: string; propertyId: string; name: string; windowMinutes: number;
@@ -26,6 +32,94 @@ async function post(path: string, body: Record<string, unknown> = {}) {
   const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify(body) });
   if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || `Request failed (${response.status})`);
   return response.json();
+}
+
+type Delta = { before: number; after: number; change: number; pct: number };
+
+export type LedgerEvent = {
+  id: string; propertyId: string; propertyName: string; source: "commit" | "content" | "tracker" | "manual";
+  kind: string; title: string; detail: string | null; pageUrl: string | null; occurredAt: string;
+  outcome: { windowDays: number; pageviews: Delta; visitors: Delta; engagement: Delta; poorVitals: Delta; seoScore: Delta | null; sampleSize: number; coOccurring: number; confidence: "low" | "medium" | "high" };
+};
+
+const ledgerWhen = (value: string) => new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(value.endsWith("Z") || /[+-]\d\d:\d\d$/.test(value) ? value : `${value}Z`));
+
+const sourceMeta: Record<LedgerEvent["source"], { label: string; icon: typeof IconGitBranch; color: string }> = {
+  commit: { label: "Code change", icon: IconGitBranch, color: "#7aa2ff" },
+  content: { label: "Content edit", icon: IconFileAnalytics, color: "#efc86b" },
+  tracker: { label: "Tracking", icon: IconShieldLock, color: "#58e0c0" },
+  manual: { label: "Manual note", icon: IconFlag, color: "#c992ff" },
+};
+
+const confidenceColor: Record<string, string> = { low: "text-[#ff8178]", medium: "text-[#efc86b]", high: "text-[#70d9b9]" };
+
+function DeltaChip({ label, delta, reliable = true }: { label: string; delta: Delta | null; reliable?: boolean }) {
+  if (!delta) return null;
+  const tone = delta.pct === 0 ? "text-[#a8b6b1]" : delta.pct > 0 ? "text-[#70d9b9]" : "text-[#ff8178]";
+  return <div className="rounded-lg bg-white/[.025] px-3 py-2">
+    <p className="text-[9px] uppercase tracking-wider text-[#61706c]">{label}</p>
+    <p className={`mt-1 text-sm font-semibold tabular-nums ${reliable ? tone : "text-[#71807c]"}`}>{reliable ? `${delta.pct > 0 ? "+" : ""}${delta.pct}%` : "Trend pending"}</p>
+    <p className="text-[10px] text-[#61706c]">{delta.before} → {delta.after}</p>
+  </div>;
+}
+
+export function Ledger({ events, properties, onRefresh }: { events: LedgerEvent[]; properties: Property[]; onRefresh: () => Promise<void> }) {
+  const [propertyId, setPropertyId] = useState(properties[0]?.id ?? "");
+  const [title, setTitle] = useState("");
+  const [detail, setDetail] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+
+  async function submit() {
+    setBusy(true); setMessage("");
+    try { await post("/api/analytics/ledger", { propertyId, title, detail: detail || undefined }); setTitle(""); setDetail(""); await onRefresh(); }
+    catch (error) { setMessage(error instanceof Error ? error.message : "Could not log this change"); }
+    finally { setBusy(false); }
+  }
+
+  async function remove(id: string) {
+    setBusy(true);
+    try { await fetch(`/api/analytics/ledger/${encodeURIComponent(id)}`, { method: "DELETE" }); await onRefresh(); }
+    finally { setBusy(false); }
+  }
+
+  return <div className="space-y-4">
+    <div className="za-panel">
+      <div className="flex items-center gap-2 text-[#58e0c0]"><IconHistory size={18}/><p className="text-[10px] font-semibold uppercase tracking-[.14em]">Log a change</p></div>
+      <p className="mt-2 max-w-2xl text-sm text-[#8b9995]">Commits, content edits, tracker installs, and your own notes are lined up against pageviews, visitors, engagement, Core Web Vitals, and SEO score in the surrounding week, so you can see which changes actually moved the needle.</p>
+      <div className="mt-5 grid gap-2 sm:grid-cols-[1fr_2fr_auto]">
+        <select value={propertyId} onChange={(event) => setPropertyId(event.target.value)} className="za-input">{properties.map((property) => <option key={property.id} value={property.id}>{property.name}</option>)}</select>
+        <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="What changed? e.g. Relaunched the pricing page" className="za-input"/>
+        <button disabled={busy || !propertyId || !title.trim()} onClick={() => void submit()} className="za-primary-button"><IconPlus size={16}/><span>Log change</span></button>
+      </div>
+      <textarea value={detail} onChange={(event) => setDetail(event.target.value)} placeholder="Optional detail" className="za-input mt-2 w-full" rows={2} />
+      {message && <p className="mt-2 text-xs text-[#ff8178]">{message}</p>}
+    </div>
+    <div className="za-panel">
+      {!events.length ? <div className="grid min-h-40 place-items-center rounded-lg border border-dashed border-white/10 p-5 text-center"><div><IconHistory className="mx-auto text-[#54625f]" size={22}/><p className="mt-3 text-sm font-medium text-[#bdc8c5]">No changes recorded yet</p><p className="mx-auto mt-1 max-w-xs text-xs leading-5 text-[#65736f]">Commits, content edits, and tracker installs will appear here automatically as they happen.</p></div></div> : <div className="space-y-1">
+        {events.map((event) => {
+          const meta = sourceMeta[event.source] ?? sourceMeta.manual; const Icon = meta.icon;
+          const reliable = event.outcome.sampleSize >= 20 && event.outcome.confidence !== "low";
+          return <article key={event.id} className="grid grid-cols-[auto_1fr_auto] gap-3 border-b border-white/[.06] px-2 py-4 last:border-0">
+            <span className="mt-1 grid size-7 shrink-0 place-items-center rounded-lg" style={{ backgroundColor: `${meta.color}1a`, color: meta.color }}><Icon size={15} /></span>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2"><p className="text-sm font-medium text-[#e2ebe8]">{event.title}</p><span className="rounded-full bg-white/[.06] px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-[#8b9995]">{meta.label}</span></div>
+              <p className="mt-1 truncate text-[10px] uppercase tracking-[.08em] text-[#61706c]">{event.propertyName} · {ledgerWhen(event.occurredAt)}{event.pageUrl ? ` · ${event.pageUrl}` : ""}</p>
+              {event.detail && <p className="mt-2 text-xs leading-5 text-[#a8b6b1]">{event.detail}</p>}
+              <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <DeltaChip label="Pageviews" delta={event.outcome.pageviews} reliable={reliable} />
+                <DeltaChip label="Visitors" delta={event.outcome.visitors} reliable={reliable} />
+                <DeltaChip label="Engagement" delta={event.outcome.engagement} reliable={reliable} />
+                {event.outcome.seoScore && <DeltaChip label="SEO score" delta={event.outcome.seoScore} reliable={reliable} />}
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-[#61706c]"><span className={`font-semibold uppercase ${confidenceColor[event.outcome.confidence]}`}>{event.outcome.confidence} confidence</span><SampleWarning sample={event.outcome.sampleSize} minimum={20} subject="Ledger outcome" /><span>· sampled over {event.outcome.windowDays}-day windows{event.outcome.coOccurring > 0 ? ` · ${event.outcome.coOccurring} other change${event.outcome.coOccurring === 1 ? "" : "s"} nearby` : ""}</span></div>
+            </div>
+            {event.source === "manual" ? <button onClick={() => void remove(event.id)} disabled={busy} className="za-icon-button self-start" aria-label="Delete note"><IconTrash size={15} /></button> : <span />}
+          </article>;
+        })}
+      </div>}
+    </div>
+  </div>;
 }
 
 export function SetupGuide({ setup, onRefresh, onAudit }: { setup: SetupData; onRefresh: () => Promise<void>; onAudit: () => Promise<void> }) {
@@ -50,19 +144,110 @@ export function SetupGuide({ setup, onRefresh, onAudit }: { setup: SetupData; on
   </section>;
 }
 
+const fixCodeLabel: Record<string, string> = {
+  missing_title: "Add a page title", missing_description: "Add a meta description",
+  missing_canonical: "Add a canonical link", noindex: "Remove noindex",
+};
+
+function FixLab({ action, onApplied }: { action: ActionData; onApplied: () => Promise<void> }) {
+  const [capability, setCapability] = useState<{ supported: boolean; reason: string | null } | null>(null);
+  const [preview, setPreview] = useState<FixPreview | null>(null);
+  const [value, setValue] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    setPreview(null); setMessage(""); setValue(""); setCapability(null);
+    if (!action.fixCode) return;
+    fetch(`/api/analytics/fixes/capability/${encodeURIComponent(action.propertyId)}`, { headers: { Accept: "application/json" } })
+      .then((response) => response.json()).then(setCapability)
+      .catch(() => setCapability({ supported: false, reason: "Could not check fix eligibility" }));
+  }, [action.key, action.fixCode, action.propertyId]);
+
+  if (!action.fixCode) return null;
+  if (!capability) return <p className="mt-3 text-[10px] text-[#61706c]">Checking whether this can be safely fixed…</p>;
+  if (!capability.supported) return <p className="mt-3 text-[10px] text-[#61706c]">Safe Fix Lab: {capability.reason}</p>;
+
+  async function runPreview() {
+    setBusy(true); setMessage("");
+    try {
+      const response = await fetch("/api/analytics/fixes/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ propertyId: action.propertyId, code: action.fixCode, value: value || undefined }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not preview this fix");
+      setPreview(data);
+      if (data.needsValue && data.suggestedValue && !value) setValue(data.suggestedValue);
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Could not preview this fix"); }
+    finally { setBusy(false); }
+  }
+
+  async function apply() {
+    setBusy(true); setMessage("");
+    try {
+      const response = await fetch("/api/analytics/fixes/apply", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ propertyId: action.propertyId, code: action.fixCode, value: value || undefined, actionKey: action.key }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not apply this fix");
+      setMessage("Fix applied and logged to the ledger."); setPreview(null);
+      await onApplied();
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Could not apply this fix"); }
+    finally { setBusy(false); }
+  }
+
+  return <div className="mt-4 rounded-lg border border-[#58e0c0]/20 bg-[#58e0c0]/[.04] p-4">
+    <div className="flex items-center gap-2 text-[#58e0c0]"><IconBolt size={15}/><p className="text-[10px] font-semibold uppercase tracking-[.14em]">Safe Fix Lab · {fixCodeLabel[action.fixCode] ?? action.fixCode}</p></div>
+    <p className="mt-2 text-[10px] leading-4 text-[#61706c]">Edits the property's index.html shell directly. Every change is previewed first and can be reverted from Applied fixes below.</p>
+    {(action.fixCode === "missing_title" || action.fixCode === "missing_description") && <input value={value} onChange={(event) => setValue(event.target.value)} placeholder={action.fixCode === "missing_title" ? "Page title" : "Meta description"} className="za-input mt-3 w-full"/>}
+    <div className="mt-3 flex flex-wrap gap-2">
+      <button disabled={busy} onClick={() => void runPreview()} className="za-secondary-button">Preview change</button>
+      {preview?.changed && <button disabled={busy} onClick={() => void apply()} className="za-primary-button">Apply fix</button>}
+    </div>
+    {preview && (preview.changed ? <div className="mt-3 grid gap-2 sm:grid-cols-2">
+      <div><p className="text-[9px] uppercase tracking-wider text-[#61706c]">Current file</p><pre className="mt-1 max-h-40 overflow-auto rounded-md bg-black/30 p-2 text-[10px] leading-4 text-[#a8b6b1]">{preview.before}</pre></div>
+      <div><p className="text-[9px] uppercase tracking-wider text-[#61706c]">Proposed file</p><pre className="mt-1 max-h-40 overflow-auto rounded-md bg-black/30 p-2 text-[10px] leading-4 text-[#70d9b9]">{preview.after}</pre></div>
+    </div> : <p className="mt-2 text-[10px] text-[#efc86b]">{preview.needsValue ? "Enter a value above, then preview again." : "No change needed — this may already be fixed."}</p>)}
+    {message && <p className={`mt-2 text-xs ${message.includes("applied") ? "text-[#70d9b9]" : "text-[#ff8178]"}`}>{message}</p>}
+  </div>;
+}
+
+function AppliedFixes({ fixes, properties, busyId, onRevert }: { fixes: SafeFix[]; properties: Property[]; busyId: string; onRevert: (id: string) => void }) {
+  if (!fixes.length) return null;
+  return <div className="za-panel">
+    <div className="flex items-center gap-2 text-[#58e0c0]"><IconBolt size={18}/><p className="text-[10px] font-semibold uppercase tracking-[.14em]">Applied fixes</p></div>
+    <div className="mt-3 space-y-1">{fixes.map((fix) => <div key={fix.id} className="flex items-center justify-between gap-3 border-b border-white/[.06] py-3 last:border-0">
+      <div className="min-w-0"><p className="text-sm text-[#e2ebe8]">{fixCodeLabel[fix.code] ?? fix.code}</p><p className="mt-1 truncate text-[10px] uppercase tracking-[.08em] text-[#61706c]">{properties.find((item) => item.id === fix.propertyId)?.name ?? fix.propertyId} · {new Date(fix.appliedAt.endsWith("Z") ? fix.appliedAt : `${fix.appliedAt}Z`).toLocaleString()}{fix.status === "reverted" ? " · reverted" : ""}</p></div>
+      {fix.status === "applied" && <button disabled={busyId === fix.id} onClick={() => onRevert(fix.id)} className="za-secondary-button shrink-0"><IconArrowBackUp size={14}/>Revert</button>}
+    </div>)}</div>
+  </div>;
+}
+
 export function ActionCenter({ actions, properties, onRefresh }: { actions: ActionData[]; properties: Property[]; onRefresh: () => Promise<void> }) {
   const [expanded, setExpanded] = useState<string | null>(actions[0]?.key ?? null);
   const [busy, setBusy] = useState("");
+  const [fixes, setFixes] = useState<SafeFix[]>([]);
+  const [revertBusy, setRevertBusy] = useState("");
+
+  async function loadFixes() {
+    const response = await fetch("/api/analytics/fixes", { headers: { Accept: "application/json" } });
+    const data = await response.json().catch(() => ({ fixes: [] }));
+    setFixes(data.fixes ?? []);
+  }
+  useEffect(() => { void loadFixes(); }, []);
+
   async function update(action: ActionData, status: "resolved" | "dismissed", snoozedUntil?: string) {
     setBusy(action.key);
     await fetch(`/api/analytics/actions/${encodeURIComponent(action.key)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status, snoozedUntil }) });
     await onRefresh(); setBusy("");
   }
+  async function revert(id: string) {
+    setRevertBusy(id);
+    try { await fetch(`/api/analytics/fixes/${encodeURIComponent(id)}/revert`, { method: "POST" }); await loadFixes(); }
+    finally { setRevertBusy(""); }
+  }
   return <div className="space-y-4">
     <section className="grid gap-4 xl:grid-cols-[.72fr_1.28fr]"><div className="za-panel"><p className="text-[10px] font-semibold uppercase tracking-[.15em] text-[#58e0c0]">Decision queue</p><h2 className="mt-2 text-3xl font-semibold tracking-[-.05em]">{actions.length} things worth your attention</h2><p className="mt-3 max-w-md text-sm leading-6 text-[#71817c]">Ordered by impact, confidence, and effort. Resolve an item after you make the change; dismiss it when it does not match your intent.</p></div><div className="za-panel"><div className="space-y-1">{actions.slice(0, 20).map((action) => {
       const property = properties.find((item) => item.id === action.propertyId); const open = expanded === action.key;
-      return <article key={action.key} className="border-b border-white/[.06] last:border-0"><button onClick={() => setExpanded(open ? null : action.key)} className="grid w-full grid-cols-[8px_1fr_auto] gap-3 px-2 py-3 text-left"><span className={`mt-1.5 size-2 rounded-full ${action.severity === "critical" ? "bg-[#ff8178]" : action.severity === "warning" ? "bg-[#efc86b]" : "bg-[#74837f]"}`}/><div className="min-w-0"><p className="text-sm font-medium text-[#e2ebe8]">{action.title}</p><p className="mt-1 truncate text-[10px] uppercase tracking-[.08em] text-[#61706c]">{property?.name ?? action.propertyId} · {action.category} · priority {action.priority}</p></div><IconChevronRight size={16} className={`mt-1 text-[#56645f] transition ${open ? "rotate-90 text-[#58e0c0]" : ""}`}/></button>{open && <div className="mb-4 ml-5 border-l border-[#58e0c0]/20 pl-5"><div className="grid gap-4 py-2 md:grid-cols-3"><Detail label="Why it matters" text={action.why}/><Detail label="Evidence" text={action.evidence}/><Detail label="Recommended fix" text={action.fix}/></div><div className="mt-3 flex flex-wrap gap-2"><button disabled={busy === action.key} onClick={() => void update(action, "resolved")} className="za-primary-button">Verify resolved</button><button disabled={busy === action.key} onClick={() => void update(action, "dismissed")} className="za-secondary-button">Dismiss</button><button disabled={busy === action.key} onClick={() => void update(action, "resolved", new Date(Date.now() + 7 * 86400000).toISOString())} className="za-text-button">Snooze 7 days</button></div></div>}</article>;
+      return <article key={action.key} className="border-b border-white/[.06] last:border-0"><button onClick={() => setExpanded(open ? null : action.key)} className="grid w-full grid-cols-[8px_1fr_auto] gap-3 px-2 py-3 text-left"><span className={`mt-1.5 size-2 rounded-full ${action.severity === "critical" ? "bg-[#ff8178]" : action.severity === "warning" ? "bg-[#efc86b]" : "bg-[#74837f]"}`}/><div className="min-w-0"><p className="text-sm font-medium text-[#e2ebe8]">{action.title}</p><p className="mt-1 truncate text-[10px] uppercase tracking-[.08em] text-[#61706c]">{property?.name ?? action.propertyId} · {action.category} · priority {action.priority}</p></div><IconChevronRight size={16} className={`mt-1 text-[#56645f] transition ${open ? "rotate-90 text-[#58e0c0]" : ""}`}/></button>{open && <div className="mb-4 ml-5 border-l border-[#58e0c0]/20 pl-5"><div className="grid gap-4 py-2 md:grid-cols-3"><Detail label="Why it matters" text={action.why}/><Detail label="Evidence" text={action.evidence}/><Detail label="Recommended fix" text={action.fix}/></div><div className="mt-3 flex flex-wrap gap-2"><button disabled={busy === action.key} onClick={() => void update(action, "resolved")} className="za-primary-button">Verify resolved</button><button disabled={busy === action.key} onClick={() => void update(action, "dismissed")} className="za-secondary-button">Dismiss</button><button disabled={busy === action.key} onClick={() => void update(action, "resolved", new Date(Date.now() + 7 * 86400000).toISOString())} className="za-text-button">Snooze 7 days</button></div><FixLab action={action} onApplied={async () => { await loadFixes(); await onRefresh(); }} /></div>}</article>;
     })}{!actions.length && <div className="grid min-h-56 place-items-center text-center"><div><IconCheck size={25} className="mx-auto text-[#58e0c0]"/><p className="mt-3 text-sm font-medium">Nothing urgent</p><p className="mt-1 text-xs text-[#65736f]">The next crawl or traffic change may create new actions.</p></div></div>}</div></div></section>
+    <AppliedFixes fixes={fixes} properties={properties} busyId={revertBusy} onRevert={(id) => void revert(id)} />
   </div>;
 }
 
@@ -121,6 +306,21 @@ export function PulseSettings() {
   function change(propertyId: string, key: keyof PulseProperty, value: string | boolean) {
     setProperties((items) => items.map((item) => item.propertyId === propertyId ? { ...item, [key]: value } : item));
   }
+  async function toggleEnabled(property: PulseProperty) {
+    const next = !property.enabled;
+    change(property.propertyId, "enabled", next);
+    setBusy(property.propertyId); setMessage("");
+    try {
+      const response = await fetch(`/api/analytics/pulse/config/${encodeURIComponent(property.propertyId)}`, { method: "PATCH", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ enabled: next }) });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Could not update Pulse settings");
+      setProperties((items) => items.map((item) => item.propertyId === property.propertyId ? data.property : item));
+      setMessage(next ? `${property.name} is now visible on Pulse.` : `${property.name} was removed from Pulse.`);
+    } catch (error) {
+      change(property.propertyId, "enabled", !next);
+      setMessage(error instanceof Error ? error.message : "Could not update Pulse settings");
+    } finally { setBusy(""); }
+  }
   async function save(property: PulseProperty) {
     setBusy(property.propertyId); setMessage("");
     try {
@@ -143,8 +343,7 @@ export function PulseSettings() {
   return <div className="space-y-4">
     <section className="grid gap-4 xl:grid-cols-[.8fr_1.2fr]">
       <div className="za-panel">
-        <div className="flex items-center gap-2 text-[#58e0c0]"><IconEye size={18}/><p className="text-[10px] font-semibold uppercase tracking-[.14em]">Public Pulse</p></div>
-        <h2 className="mt-3 max-w-lg text-3xl font-semibold tracking-[-.05em]">Share proof, not private analytics.</h2>
+        <div className="flex items-center gap-2 text-[#58e0c0]"><IconEye size={18}/><p className="text-[10px] font-semibold uppercase tracking-[.14em]">Publishing controls</p></div>
         <p className="mt-3 max-w-xl text-sm leading-6 text-[#82928d]">Every property and metric is opt-in. Pulse publishes a sanitized 30-day snapshot and never exposes visitor hashes, sessions, paths, referrers, campaigns, events, errors, or repository details.</p>
         <div className="mt-6 flex flex-wrap gap-2">
           <button onClick={() => void refresh()} disabled={Boolean(busy)} className="za-primary-button"><IconRefresh size={15} className={busy === "refresh" ? "animate-spin" : ""}/>Refresh snapshot</button>
@@ -154,14 +353,15 @@ export function PulseSettings() {
       <div className="za-panel">
         <div className="flex items-center gap-2 text-[#58e0c0]"><IconShieldLock size={18}/><p className="text-[10px] font-semibold uppercase tracking-[.14em]">Publication boundary</p></div>
         <div className="mt-5 grid grid-cols-2 gap-px overflow-hidden rounded-lg bg-white/[.07]"><Metric label="Enabled properties" value={enabled}/><Metric label="Available properties" value={properties.length}/></div>
-        <div className="mt-5 space-y-2 text-xs leading-5 text-[#82928d]"><p>Nothing is public until you enable a property and save it.</p><p>The public service reads only the latest generated snapshot, never the live analytics tables.</p><p>Web Vitals stay hidden until a metric has at least five samples.</p></div>
+        <div className="mt-5 space-y-2 text-xs leading-5 text-[#82928d]"><p>Nothing is public until you flip a property's switch below. That takes effect immediately.</p><p>The public service reads only the latest generated snapshot, never the live analytics tables.</p><p>Web Vitals stay hidden until a metric has at least five samples.</p></div>
       </div>
     </section>
     {loading ? <div className="za-panel text-sm text-[#71817c]">Reading Pulse settings...</div> : <section className="space-y-3">{properties.map((property) => <article key={property.propertyId} className={`za-panel transition ${property.enabled ? "border-[#58e0c0]/25" : ""}`}>
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-0"><div className="flex items-center gap-3"><button type="button" role="switch" aria-checked={property.enabled} aria-label={`Publish ${property.name} in Pulse`} onClick={() => change(property.propertyId, "enabled", !property.enabled)} className={`relative h-6 w-11 rounded-full border transition ${property.enabled ? "border-[#58e0c0] bg-[#58e0c0]" : "border-white/15 bg-white/[.05]"}`}><span className={`absolute top-0.5 size-4 rounded-full bg-[#07110e] transition-transform ${property.enabled ? "translate-x-5" : "translate-x-1"}`}/></button><div><h3 className="text-base font-semibold tracking-[-.025em]">{property.name}</h3><p className="mt-1 truncate text-[10px] text-[#61706c]">{property.url}</p></div></div></div>
-        <button onClick={() => void save(property)} disabled={Boolean(busy)} className="za-primary-button self-start">{busy === property.propertyId ? "Saving" : "Save settings"}</button>
+        <div className="min-w-0"><div className="flex items-center gap-3"><button type="button" role="switch" aria-checked={property.enabled} aria-label={`Publish ${property.name} in Pulse`} onClick={() => void toggleEnabled(property)} disabled={Boolean(busy)} className={`inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition ${property.enabled ? "border-[#58e0c0] bg-[#58e0c0]" : "border-white/15 bg-white/[.05]"}`}><span className={`ml-0.5 block size-4 shrink-0 rounded-full bg-[#07110e] transition-transform ${property.enabled ? "translate-x-5" : "translate-x-0"}`}/></button><div><h3 className="text-base font-semibold tracking-[-.025em]">{property.name}</h3><p className="mt-1 truncate text-[10px] text-[#61706c]">{property.url}</p></div></div></div>
+        <button onClick={() => void save(property)} disabled={Boolean(busy)} className="za-primary-button self-start">{busy === property.propertyId ? "Saving" : "Save details"}</button>
       </div>
+      <p className="mt-3 text-[10px] text-[#61706c]">The switch above publishes or unpublishes {property.name} immediately. Use save to apply the display name and metric choices below.</p>
       <div className={`mt-5 space-y-4 ${property.enabled ? "" : "opacity-55"}`}>
         <label className="block"><span className="text-[10px] font-semibold uppercase tracking-[.12em] text-[#65736f]">Public display name</span><input value={property.displayName ?? ""} onChange={(event) => change(property.propertyId, "displayName", event.target.value)} placeholder={property.name} className="za-input mt-2 w-full max-w-md"/></label>
         <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">{pulseMetrics.map((metric) => <label key={metric.key} className="flex cursor-pointer items-start gap-3 rounded-lg border border-white/[.07] bg-white/[.025] p-3 hover:border-white/[.13]"><input type="checkbox" checked={Boolean(property[metric.key])} onChange={(event) => change(property.propertyId, metric.key, event.target.checked)} className="mt-0.5 size-4 accent-[#58e0c0]"/><span><span className="block text-xs font-medium text-[#dce7e4]">{metric.label}</span><span className="mt-1 block text-[10px] leading-4 text-[#61706c]">{metric.detail}</span></span></label>)}</div>

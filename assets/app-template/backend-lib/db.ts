@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { assessComparison, assessFreshness, assessTracker } from "./confidence";
 
 const dbPath = join(process.cwd(), "data", "zoanalytics.db");
 mkdirSync(dirname(dbPath), { recursive: true });
@@ -19,6 +20,7 @@ export type Property = {
   tags: string;
   gscProperty: string | null;
   ahrefsTarget: string | null;
+  verifiedAt: string | null;
 };
 
 export type DiscoveredProperty = {
@@ -53,7 +55,7 @@ export type CollectPayload = {
   campaign?: { source?: string; medium?: string; campaign?: string; content?: string; term?: string };
 };
 
-export const APP_VERSION = "0.4.0";
+export const APP_VERSION = "0.6.0";
 
 export type CrawlPageInput = {
   propertyId: string;
@@ -448,6 +450,37 @@ function migrate() {
     );
 
     CREATE INDEX IF NOT EXISTS idx_common_crawl_links_property ON common_crawl_links(property_id, release_id);
+
+    CREATE TABLE IF NOT EXISTS change_events (
+      id TEXT PRIMARY KEY,
+      property_id TEXT NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
+      source TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      title TEXT NOT NULL,
+      detail TEXT,
+      page_url TEXT,
+      external_ref TEXT,
+      occurred_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(property_id, source, external_ref)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_change_events_property ON change_events(property_id, occurred_at);
+
+    CREATE TABLE IF NOT EXISTS safe_fixes (
+      id TEXT PRIMARY KEY,
+      property_id TEXT NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
+      action_key TEXT,
+      code TEXT NOT NULL,
+      file_path TEXT NOT NULL,
+      before_content TEXT NOT NULL,
+      after_content TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'applied',
+      applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      reverted_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_safe_fixes_property ON safe_fixes(property_id, applied_at);
   `);
 
   ensureColumn("pageviews", "session_id", "TEXT");
@@ -466,6 +499,7 @@ function migrate() {
   ensureColumn("properties", "retired_at", "TEXT");
   db.prepare("UPDATE properties SET lifecycle='retired', retired_at=COALESCE(retired_at, CURRENT_TIMESTAMP) WHERE url NOT LIKE 'http%'").run();
   db.prepare("INSERT OR IGNORE INTO schema_migrations (version) VALUES (4)").run();
+  db.prepare("INSERT OR IGNORE INTO schema_migrations (version) VALUES (5)").run();
   db.prepare("INSERT INTO app_settings (key, value) VALUES ('app_version', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP").run(APP_VERSION);
 }
 
@@ -493,7 +527,7 @@ function id(prefix: string) {
 export function getProperties(): Property[] {
   return db.query(`
     SELECT id, name, kind, url, project_path AS projectPath, status, tags,
-      gsc_property AS gscProperty, ahrefs_target AS ahrefsTarget
+      gsc_property AS gscProperty, ahrefs_target AS ahrefsTarget, verified_at AS verifiedAt
     FROM properties
     WHERE lifecycle = 'active'
     ORDER BY name COLLATE NOCASE
@@ -503,7 +537,7 @@ export function getProperties(): Property[] {
 export function getProperty(id: string): Property | null {
   return db.query(`
     SELECT id, name, kind, url, project_path AS projectPath, status, tags,
-      gsc_property AS gscProperty, ahrefs_target AS ahrefsTarget
+      gsc_property AS gscProperty, ahrefs_target AS ahrefsTarget, verified_at AS verifiedAt
     FROM properties
     WHERE id = ?
   `).get(id) as Property | null;
@@ -843,10 +877,11 @@ export function getDashboard(requestedDays = 30) {
         AND latest.captured_at = cp.captured_at
     ),
     traffic AS (
-      SELECT property_id, COUNT(*) AS pageviews, COUNT(DISTINCT visitor_hash) AS visitors,
-        MAX(created_at) AS lastHitAt
+      SELECT property_id,
+        SUM(CASE WHEN created_at >= datetime('now', '${currentWindow}') THEN 1 ELSE 0 END) AS pageviews,
+        COUNT(DISTINCT CASE WHEN created_at >= datetime('now', '${currentWindow}') THEN visitor_hash END) AS visitors,
+        MIN(created_at) AS firstSeenAt, MAX(created_at) AS lastHitAt
       FROM pageviews
-      WHERE created_at >= datetime('now', '${currentWindow}')
       GROUP BY property_id
     ),
     events30 AS (
@@ -873,11 +908,11 @@ export function getDashboard(requestedDays = 30) {
       FROM seo_findings
       GROUP BY property_id
     )
-    SELECT p.id AS propertyId, p.name, p.kind, p.status, p.url,
+    SELECT p.id AS propertyId, p.name, p.kind, p.status, p.url, p.verified_at AS verifiedAt,
       COALESCE(traffic.pageviews, 0) AS pageviews,
       COALESCE(traffic.visitors, 0) AS visitors,
       COALESCE(events30.events, 0) AS events,
-      traffic.lastHitAt,
+      traffic.firstSeenAt, traffic.lastHitAt,
       COALESCE(crawl.crawledPages, 0) AS crawledPages,
       COALESCE(crawl.averageSeoScore, 0) AS averageSeoScore,
       COALESCE(crawl.brokenPages, 0) AS brokenPages,
@@ -1051,21 +1086,48 @@ export function getDashboard(requestedDays = 30) {
     LIMIT 100
   `).all() as Array<{ propertyId: string; sourceHost: string; targetHosts: string; linkEdges: number }>;
 
-  const change = (current: number, previous: number) => previous > 0 ? (current - previous) / previous : current > 0 ? 1 : 0;
+  const pageviewsComparison = assessComparison(totals.pageviews, previousTotals.pageviews);
+  const visitorsComparison = assessComparison(totals.visitors, previousTotals.visitors, 10);
+  const sourceQuality = {
+    traffic: assessFreshness("traffic", freshness.traffic),
+    crawler: assessFreshness("crawler", freshness.crawler),
+    ranks: assessFreshness("ranks", freshness.ranks),
+    backlinks: assessFreshness("backlinks", freshness.backlinks),
+    authority: assessFreshness("authority", freshness.authority),
+  };
+  const propertyQuality = propertyRollups.map((item: any) => ({
+    propertyId: item.propertyId,
+    tracker: assessTracker(item.status, item.verifiedAt, item.lastHitAt),
+    crawler: assessFreshness("crawler", item.lastCrawledAt),
+  }));
 
   return {
     range: { days, label: `Last ${days} days` },
     comparison: {
-      pageviews: change(totals.pageviews, previousTotals.pageviews),
-      visitors: change(totals.visitors, previousTotals.visitors),
+      pageviews: pageviewsComparison.change,
+      visitors: visitorsComparison.change,
       previousPageviews: previousTotals.pageviews,
       previousVisitors: previousTotals.visitors,
+      pageviewsQuality: pageviewsComparison,
+      visitorsQuality: visitorsComparison,
     },
     propertyComparisons: propertyComparisons.map((item) => ({
       ...item,
-      pageviewsChange: change(item.pageviews, item.previousPageviews),
-      visitorsChange: change(item.visitors, item.previousVisitors),
+      pageviewsChange: assessComparison(item.pageviews, item.previousPageviews).change,
+      visitorsChange: assessComparison(item.visitors, item.previousVisitors, 10).change,
+      pageviewsQuality: assessComparison(item.pageviews, item.previousPageviews),
+      visitorsQuality: assessComparison(item.visitors, item.previousVisitors, 10),
     })),
+    dataQuality: {
+      sources: sourceQuality,
+      properties: propertyQuality,
+      counts: {
+        unverified: propertyQuality.filter((item) => item.tracker.state === "unverified").length,
+        missingTraffic: propertyQuality.filter((item) => item.tracker.state === "missing").length,
+        staleTraffic: propertyQuality.filter((item) => item.tracker.state === "stale").length,
+        staleSources: Object.values(sourceQuality).filter((item) => item.state === "stale").length,
+      },
+    },
     freshness,
     sources: {
       traffic: { kind: "first-party", label: "First-party tracker" },

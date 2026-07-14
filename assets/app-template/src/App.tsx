@@ -13,19 +13,23 @@ import {
   IconBrandCloudflare, IconBrandGithub, IconEye,
 } from "@tabler/icons-react";
 import { ThemeProvider } from "@/components/theme-provider";
-import { ActionCenter, Outcomes, PageExplorer, PulseSettings, SetupGuide, type ActionData, type BriefData, type FunnelData, type SetupData } from "@/product";
+import { DataStateBadge, FreshnessLabel, SampleWarning, relativeTime, type DataQualitySignal } from "@/components/data-state";
+import { ActionCenter, Ledger, Outcomes, PageExplorer, PulseSettings, SetupGuide, type ActionData, type BriefData, type FunnelData, type LedgerEvent, type SetupData } from "@/product";
 
 type Property = {
   id: string; name: string; kind: "space" | "site" | "service" | "external"; url: string;
   projectPath: string | null; status: "tracked" | "missing-tracker" | "needs-review";
-  tags: string; gscProperty: string | null; ahrefsTarget: string | null;
+  tags: string; gscProperty: string | null; ahrefsTarget: string | null; verifiedAt: string | null;
 };
+
+type ComparisonQuality = { current: number; previous: number; change: number | null; displayPercent: boolean; state: "current" | "insufficient-sample"; explanation: string };
 
 type Dashboard = {
   range: { days: number; label: string };
-  comparison: { pageviews: number; visitors: number; previousPageviews: number; previousVisitors: number };
-  propertyComparisons: Array<{ propertyId: string; pageviews: number; visitors: number; previousPageviews: number; previousVisitors: number; pageviewsChange: number; visitorsChange: number }>;
+  comparison: { pageviews: number | null; visitors: number | null; previousPageviews: number; previousVisitors: number; pageviewsQuality: ComparisonQuality; visitorsQuality: ComparisonQuality };
+  propertyComparisons: Array<{ propertyId: string; pageviews: number; visitors: number; previousPageviews: number; previousVisitors: number; pageviewsChange: number | null; visitorsChange: number | null; pageviewsQuality: ComparisonQuality; visitorsQuality: ComparisonQuality }>;
   freshness: { traffic: string | null; crawler: string | null; ranks: string | null; backlinks: string | null; authority: string | null };
+  dataQuality: { sources: Record<"traffic" | "crawler" | "ranks" | "backlinks" | "authority", DataQualitySignal>; properties: Array<{ propertyId: string; tracker: DataQualitySignal; crawler: DataQualitySignal }>; counts: { unverified: number; missingTraffic: number; staleTraffic: number; staleSources: number } };
   sources: Record<string, { kind: string; label: string }>;
   domainRatings: Array<{ propertyId: string; domainRating: number; capturedAt: string }>;
   authorityScores: Array<{ propertyId: string; releaseId: string; authorityScore: number; referringHosts: number; linkEdges: number; targetHosts: string[]; indexedTargetHosts: string[]; indexedHosts: number; capturedAt: string }>;
@@ -46,7 +50,7 @@ type Dashboard = {
   seoFindings: Array<{ propertyId: string; pageUrl: string; severity: "critical" | "warning" | "info"; code: string; message: string; createdAt: string }>;
   keywordCandidates: Array<{ propertyId: string; pageUrl: string; keyword: string; weight: number; source: string }>;
   referrerDomains: Array<{ propertyId: string; referrer: string; visits: number }>;
-  propertyRollups: Array<{ propertyId: string; name: string; kind: string; status: string; url: string; pageviews: number; visitors: number; events: number; lastHitAt: string | null; crawledPages: number; averageSeoScore: number; brokenPages: number; missingTitles: number; missingDescriptions: number; thinPages: number; lastCrawledAt: string | null; criticalFindings: number; warningFindings: number; totalFindings: number }>;
+  propertyRollups: Array<{ propertyId: string; name: string; kind: string; status: string; url: string; verifiedAt: string | null; pageviews: number; visitors: number; events: number; firstSeenAt: string | null; lastHitAt: string | null; crawledPages: number; averageSeoScore: number; brokenPages: number; missingTitles: number; missingDescriptions: number; thinPages: number; lastCrawledAt: string | null; criticalFindings: number; warningFindings: number; totalFindings: number }>;
   eventSummary: Array<{ propertyId: string; name: string; path: string | null; count: number; lastSeenAt: string }>;
   recentActivity: Array<{ propertyId: string; path: string; title: string | null; referrer: string | null; screen: string | null; language: string | null; timezone: string | null; createdAt: string }>;
   referrerSummary: Array<{ propertyId: string; source: string; visits: number; pages: number }>;
@@ -76,7 +80,7 @@ type Intelligence = {
   collectorOrigin: string;
 };
 
-type View = "overview" | "actions" | "traffic" | "content" | "seo" | "technical" | "outcomes" | "pulse" | "intelligence";
+type View = "overview" | "actions" | "traffic" | "content" | "seo" | "technical" | "outcomes" | "ledger" | "pulse" | "intelligence";
 const views: Array<{ id: View; label: string; icon: typeof IconRadar }> = [
   { id: "overview", label: "Overview", icon: IconRadar },
   { id: "actions", label: "Actions", icon: IconTargetArrow },
@@ -85,13 +89,27 @@ const views: Array<{ id: View; label: string; icon: typeof IconRadar }> = [
   { id: "seo", label: "Search & links", icon: IconWorldSearch },
   { id: "technical", label: "Site audit", icon: IconBrandSpeedtest },
   { id: "outcomes", label: "Outcomes", icon: IconTrophy },
+  { id: "ledger", label: "Ledger", icon: IconHistory },
   { id: "pulse", label: "Public Pulse", icon: IconEye },
   { id: "intelligence", label: "Intelligence", icon: IconSparkles },
 ];
 
+const viewCopy: Record<View, { eyebrow: string; title: string; subtitle: string }> = {
+  overview: { eyebrow: "Overview", title: "See what earns attention.", subtitle: "Fix what quietly leaks it." },
+  actions: { eyebrow: "Actions", title: "Know exactly what to fix next.", subtitle: "Ranked by impact, confidence, and effort." },
+  traffic: { eyebrow: "Traffic", title: "Where your attention comes from.", subtitle: "Pageviews, visitors, and referrers, first-party." },
+  content: { eyebrow: "Content", title: "See which pages are working.", subtitle: "Opportunities and page-level detail, ranked." },
+  seo: { eyebrow: "Search & links", title: "Rankings, clicks, and backlinks.", subtitle: "Search Console signals and the public link graph." },
+  technical: { eyebrow: "Site audit", title: "Catch what's quietly broken.", subtitle: "Crawl findings and technical health, by severity." },
+  outcomes: { eyebrow: "Outcomes", title: "Turn traffic into results.", subtitle: "Goals, funnels, weekly briefs, and data exports." },
+  ledger: { eyebrow: "Ledger", title: "Every change, and what happened next.", subtitle: "Commits and edits lined up against real outcomes." },
+  pulse: { eyebrow: "Public Pulse", title: "Share proof, not private analytics.", subtitle: "Opt-in, sanitized metrics you can publish publicly." },
+  intelligence: { eyebrow: "Intelligence", title: "Deeper signals, every property.", subtitle: "Sessions, journeys, vitals, errors, and the link graph." },
+};
+
 const n = (value: number) => new Intl.NumberFormat("en-US", { notation: value > 9999 ? "compact" : "standard", maximumFractionDigits: 1 }).format(value || 0);
 const pct = (value: number) => `${Math.round((value || 0) * 100)}%`;
-const trend = (value: number) => `${value > 0 ? "+" : ""}${Math.round((value || 0) * 100)}%`;
+const trend = (quality: ComparisonQuality) => quality.displayPercent && quality.change !== null ? `${quality.change > 0 ? "+" : ""}${Math.round(quality.change * 100)}% vs previous period` : quality.explanation;
 const when = (value: string | null) => value ? new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(value.endsWith("Z") ? value : `${value}Z`)) : "No data";
 const host = (value: string) => { try { return new URL(value).hostname; } catch { return value; } };
 
@@ -106,6 +124,7 @@ function DashboardApp() {
   const [actions, setActions] = useState<ActionData[]>([]);
   const [funnels, setFunnels] = useState<FunnelData[]>([]);
   const [briefs, setBriefs] = useState<BriefData[]>([]);
+  const [ledger, setLedger] = useState<LedgerEvent[]>([]);
   const [view, setView] = useState<View>("overview");
   const [property, setProperty] = useState("all");
   const [days, setDays] = useState(30);
@@ -116,17 +135,18 @@ function DashboardApp() {
   async function load() {
     setLoading(true); setError("");
     try {
-      const [summaryResponse, intelligenceResponse, setupResponse, actionsResponse, funnelsResponse, briefsResponse] = await Promise.all([
+      const [summaryResponse, intelligenceResponse, setupResponse, actionsResponse, funnelsResponse, briefsResponse, ledgerResponse] = await Promise.all([
         fetch(`/api/analytics/summary?days=${days}`, { headers: { Accept: "application/json" } }),
         fetch("/api/analytics/intelligence", { headers: { Accept: "application/json" } }),
         fetch("/api/analytics/setup", { headers: { Accept: "application/json" } }),
         fetch("/api/analytics/actions", { headers: { Accept: "application/json" } }),
         fetch("/api/analytics/funnels", { headers: { Accept: "application/json" } }),
         fetch("/api/analytics/briefs", { headers: { Accept: "application/json" } }),
+        fetch("/api/analytics/ledger", { headers: { Accept: "application/json" } }),
       ]);
-      if (![summaryResponse, intelligenceResponse, setupResponse, actionsResponse, funnelsResponse, briefsResponse].every((response) => response.ok)) throw new Error("One or more dashboard signals could not be read");
-      const [summary, signals, setupState, actionState, funnelState, briefState] = await Promise.all([summaryResponse.json(), intelligenceResponse.json(), setupResponse.json(), actionsResponse.json(), funnelsResponse.json(), briefsResponse.json()]);
-      setData(summary); setIntelligence(signals); setSetup(setupState); setActions(actionState.actions); setFunnels(funnelState.funnels); setBriefs(briefState.briefs);
+      if (![summaryResponse, intelligenceResponse, setupResponse, actionsResponse, funnelsResponse, briefsResponse, ledgerResponse].every((response) => response.ok)) throw new Error("One or more dashboard signals could not be read");
+      const [summary, signals, setupState, actionState, funnelState, briefState, ledgerState] = await Promise.all([summaryResponse.json(), intelligenceResponse.json(), setupResponse.json(), actionsResponse.json(), funnelsResponse.json(), briefsResponse.json(), ledgerResponse.json()]);
+      setData(summary); setIntelligence(signals); setSetup(setupState); setActions(actionState.actions); setFunnels(funnelState.funnels); setBriefs(briefState.briefs); setLedger(ledgerState.events);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Dashboard request failed"); }
     finally { setLoading(false); }
   }
@@ -158,7 +178,7 @@ function DashboardApp() {
               <div className="grid size-8 place-items-center rounded-[9px] bg-[#58e0c0] text-[#07110e]"><IconRadar size={19} stroke={2.2} /></div>
               <div><p className="text-sm font-semibold tracking-[-.02em]">ZoAnalytics</p><p className="hidden text-[10px] text-[#73827e] sm:block">PRIVATE INTELLIGENCE</p></div>
             </div>
-            <nav className="hidden items-center gap-1 lg:flex" aria-label="Dashboard views">
+            <nav className="za-scrollbar-none hidden min-w-0 flex-1 items-center gap-1 overflow-x-auto lg:flex" aria-label="Dashboard views">
               {views.map(({ id, label, icon: Icon }) => <NavButton key={id} active={view === id} onClick={() => setView(id)} icon={Icon} label={label} />)}
             </nav>
             <div className="flex items-center gap-2">
@@ -173,8 +193,8 @@ function DashboardApp() {
 
         <section className="flex flex-col gap-5 pb-7 pt-8 sm:pt-10 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <div className="mb-3 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[.16em] text-[#58e0c0]"><span className="size-1.5 rounded-full bg-[#58e0c0] shadow-[0_0_12px_#58e0c0]" />Live portfolio intelligence</div>
-            <h1 className="max-w-4xl text-[2.35rem] font-semibold leading-[.98] tracking-[-.055em] sm:text-6xl lg:text-[4.6rem]">See what earns attention.<br/><span className="text-[#7f8e8a]">Fix what quietly leaks it.</span></h1>
+            <div className="mb-3 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[.16em] text-[#58e0c0]"><span className="size-1.5 rounded-full bg-[#58e0c0] shadow-[0_0_12px_#58e0c0]" />{viewCopy[view].eyebrow}</div>
+            <h1 className="max-w-4xl text-[2.35rem] font-semibold leading-[.98] tracking-[-.055em] sm:text-6xl lg:text-[4.6rem]">{viewCopy[view].title}<br/><span className="text-[#7f8e8a]">{viewCopy[view].subtitle}</span></h1>
           </div>
           <div className="flex flex-col items-start gap-2 lg:items-end">
             <span className="text-[10px] font-semibold uppercase tracking-[.16em] text-[#65736f]">Scope & period</span>
@@ -192,8 +212,8 @@ function DashboardApp() {
             {setup && <SetupGuide setup={setup} onRefresh={load} onAudit={crawl} />}
             <section className="mb-6 grid gap-px overflow-hidden rounded-xl border border-white/[.08] bg-white/[.08] sm:grid-cols-2 xl:grid-cols-5">
               <Kpi label="Portfolio health" value={`${score}`} suffix="/100" note={`${filtered.totals.tracked}/${filtered.totals.properties} tracked · ${filtered.totals.averageSeoScore || 0} audit`} icon={IconSparkles} accent />
-              <Kpi label="Pageviews" value={n(filtered.totals.pageviews)} note={`${trend(filtered.comparison.pageviews)} vs previous period`} icon={IconActivity} />
-              <Kpi label="Visitors" value={n(filtered.totals.visitors)} note={`${trend(filtered.comparison.visitors)} vs previous period`} icon={IconSearch} />
+              <Kpi label="Pageviews" value={n(filtered.totals.pageviews)} note={trend(filtered.comparison.pageviewsQuality)} icon={IconActivity} state={filtered.comparison.pageviewsQuality.state} />
+              <Kpi label="Visitors" value={n(filtered.totals.visitors)} note={trend(filtered.comparison.visitorsQuality)} icon={IconSearch} state={filtered.comparison.visitorsQuality.state} />
               <Kpi label="Crawled pages" value={n(filtered.totals.crawledPages)} note={`${filtered.totals.averageSeoScore || 0} average SEO score`} icon={IconSeo} />
               <Kpi label="Observed links" value={n(filtered.totals.backlinks)} note={`${n(filtered.totals.referringDomains)} referring domains`} icon={IconLink} />
             </section>
@@ -208,6 +228,7 @@ function DashboardApp() {
           {view === "seo" && <SearchLinks data={filtered} />}
           {view === "technical" && <Technical data={filtered} />}
           {view === "outcomes" && intelligence && <Outcomes properties={filtered.properties} goals={filterIntelligence(intelligence, property).goals} funnels={funnels.filter((item) => property === "all" || item.propertyId === property)} briefs={briefs} onRefresh={load} />}
+          {view === "ledger" && <Ledger events={ledger.filter((item) => property === "all" || item.propertyId === property)} properties={data.properties} onRefresh={load} />}
           {view === "pulse" && <PulseSettings />}
           {view === "intelligence" && intelligence && <IntelligenceView data={filtered} intelligence={filterIntelligence(intelligence, property)} reload={load} />}
         </div>
@@ -219,6 +240,7 @@ function DashboardApp() {
 function Overview({ data, name, onSelectProperty }: { data: Dashboard; name: string; onSelectProperty: (id: string) => void }) {
   const properties = data.properties;
   return <div className="space-y-4">
+    <DataQualitySummary data={data} />
     <section className="grid gap-4 xl:grid-cols-[1.55fr_.75fr]">
       <Panel title="Attention over time" eyebrow={`${name} · 14 days`} icon={IconChartAreaLine}>
         <TrafficChart data={data.trend} />
@@ -234,9 +256,26 @@ function Overview({ data, name, onSelectProperty }: { data: Dashboard; name: str
     <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
       <Panel title="Acquisition" eyebrow="Observed traffic sources" icon={IconExternalLink}><RankedRows rows={data.referrerSummary.map((row) => ({ title: row.source, label: propertyName(properties, row.propertyId), value: row.visits, suffix: "visits" }))} /></Panel>
       <Panel title="Devices" eyebrow="First-party visitor mix" icon={IconDeviceDesktopAnalytics}><MixBars data={data} /></Panel>
-      <Panel title="Live activity" eyebrow="Latest tracked visits" icon={IconActivity}><ActivityFeed data={data} /></Panel>
+      <Panel title={data.dataQuality.sources.traffic.state === "live" ? "Live activity" : "Recent activity"} eyebrow={data.dataQuality.sources.traffic.state === "live" ? "Visits within the live window" : `Latest signal ${relativeTime(data.freshness.traffic)}`} icon={IconActivity}><ActivityFeed data={data} /></Panel>
     </section>
   </div>;
+}
+
+function DataQualitySummary({ data }: { data: Dashboard }) {
+  const exceptions = [
+    { label: "Tracker not verified", count: data.dataQuality.counts.unverified, state: "unverified" as const },
+    { label: "Verified, no visits", count: data.dataQuality.counts.missingTraffic, state: "missing" as const },
+    { label: "Traffic stale", count: data.dataQuality.counts.staleTraffic, state: "stale" as const },
+    { label: "Sources stale", count: data.dataQuality.counts.staleSources, state: "stale" as const },
+  ].filter((item) => item.count > 0);
+  const reliable = !exceptions.length;
+  const signal: DataQualitySignal = reliable
+    ? { state: "current", label: "Data current", explanation: "No portfolio-level data quality exceptions were detected.", observedAt: data.freshness.traffic, ageMinutes: null }
+    : { state: exceptions.some((item) => item.state === "unverified") ? "unverified" : "stale", label: `${exceptions.reduce((sum, item) => sum + item.count, 0)} exceptions`, explanation: "Some metrics need verification, a fresh signal, or a scheduled refresh.", observedAt: null, ageMinutes: null };
+  return <section className="flex flex-col gap-3 rounded-xl border border-white/[.08] bg-[#0d1315] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex items-center gap-3"><DataStateBadge signal={signal} /><div><p className="text-sm font-medium text-[#dce6e3]">Data quality</p><p className="mt-0.5 text-[11px] text-[#71807c]">Trust states reflect tracker verification, source freshness, and sample size.</p></div></div>
+    <div className="flex flex-wrap gap-x-4 gap-y-1">{reliable ? <span className="text-xs text-[#70d9b9]">All active sources are within their expected windows.</span> : exceptions.map((item) => <span key={item.label} className="text-xs text-[#9caaa6]"><strong className="mr-1 tabular-nums text-[#eef5f3]">{item.count}</strong>{item.label}</span>)}</div>
+  </section>;
 }
 
 function Traffic({ data }: { data: Dashboard }) {
@@ -269,12 +308,12 @@ function Technical({ data }: { data: Dashboard }) {
 
 function SourceStrip({ data }: { data: Dashboard }) {
   const items = [
-    { label: "Traffic", source: data.sources.traffic.label, fresh: data.freshness.traffic },
-    { label: "Audit", source: data.sources.crawler.label, fresh: data.freshness.crawler },
-    { label: "Rankings", source: data.sources.rankings.label, fresh: data.freshness.ranks },
-    { label: "Links", source: data.sources.backlinks.label, fresh: data.freshness.backlinks },
+    { label: "Traffic", source: data.sources.traffic.label, quality: data.dataQuality.sources.traffic },
+    { label: "Audit", source: data.sources.crawler.label, quality: data.dataQuality.sources.crawler },
+    { label: "Rankings", source: data.sources.rankings.label, quality: data.dataQuality.sources.ranks },
+    { label: "Links", source: data.sources.backlinks.label, quality: data.dataQuality.sources.backlinks },
   ];
-  return <section className="mb-4 grid gap-px overflow-hidden rounded-lg border border-white/[.07] bg-white/[.07] sm:grid-cols-2 xl:grid-cols-4">{items.map((item) => <div key={item.label} className="flex items-center justify-between gap-3 bg-[#0b1113] px-3 py-2.5"><div><p className="text-[9px] font-semibold uppercase tracking-[.14em] text-[#60706b]">{item.label}</p><p className="mt-1 text-xs text-[#aab7b3]">{item.source}</p></div><span className="shrink-0 text-[10px] text-[#60706b]">{when(item.fresh)}</span></div>)}</section>;
+  return <section className="mb-4 grid gap-px overflow-hidden rounded-lg border border-white/[.07] bg-white/[.07] sm:grid-cols-2 xl:grid-cols-4">{items.map((item) => <div key={item.label} className="flex items-center justify-between gap-3 bg-[#0b1113] px-3 py-2.5"><div><p className="text-[9px] font-semibold uppercase tracking-[.14em] text-[#60706b]">{item.label}</p><p className="mt-1 text-xs text-[#aab7b3]">{item.source}</p></div><FreshnessLabel signal={item.quality} /></div>)}</section>;
 }
 
 function PropertyBrief({ data, property }: { data: Dashboard; property: Property }) {
@@ -297,7 +336,7 @@ function IntelligenceView({ data, intelligence, reload }: { data: Dashboard; int
     </section>
     <section className="grid gap-4 xl:grid-cols-[1.15fr_.85fr]">
       <Panel title="Visitor journeys" eyebrow="Privacy-safe session paths" icon={IconRoute}>{sessionRows.length ? <RankedRows rows={sessionRows}/> : <Empty icon={IconRoute} title="New tracker data is needed" text="Sessions and journeys begin populating as upgraded tracker events arrive."/>}</Panel>
-      <Panel title="Core Web Vitals" eyebrow="Real-user p75 performance" icon={IconHeartbeat}>{intelligence.vitals.length ? <div className="grid gap-px overflow-hidden rounded-lg bg-white/[.07] sm:grid-cols-2">{intelligence.vitals.map((item) => <div key={`${item.propertyId}-${item.metric}`} className="bg-[#0d1315] p-4"><div className="flex items-center justify-between"><p className="text-xs font-semibold text-[#93a19d]">{item.metric}</p><span className={item.poorSamples ? "text-[10px] text-[#ff8178]" : "text-[10px] text-[#70d9b9]"}>{item.samples < 10 ? "low sample" : item.poorSamples ? `${item.poorSamples} poor` : "healthy"}</span></div><p className="mt-3 text-3xl font-semibold tabular-nums">{item.p75}</p><p className="mt-1 text-[10px] text-[#61706c]">{propertyName(data.properties,item.propertyId)} · p75 · {item.samples} samples</p></div>)}</div> : <Empty icon={IconHeartbeat} title="Collecting field performance" text="LCP, INP and CLS arrive automatically; TTFB remains a diagnostic."/>}</Panel>
+      <Panel title="Core Web Vitals" eyebrow="Real-user p75 performance" icon={IconHeartbeat}>{intelligence.vitals.length ? <div className="grid gap-px overflow-hidden rounded-lg bg-white/[.07] sm:grid-cols-2">{intelligence.vitals.map((item) => <div key={`${item.propertyId}-${item.metric}`} className="bg-[#0d1315] p-4"><div className="flex items-center justify-between gap-3"><p className="text-xs font-semibold text-[#93a19d]">{item.metric}</p><SampleWarning sample={item.samples} minimum={5} subject={`${item.metric} p75`} /></div><p className={`mt-3 text-3xl font-semibold tabular-nums ${item.samples < 5 ? "text-[#71807c]" : ""}`}>{item.samples < 5 ? "—" : item.p75}</p><p className="mt-1 text-[10px] text-[#61706c]">{propertyName(data.properties,item.propertyId)} · {item.samples < 5 ? "collecting observations" : `p75 · ${item.samples} samples${item.poorSamples ? ` · ${item.poorSamples} poor` : ""}`}</p></div>)}</div> : <Empty icon={IconHeartbeat} title="Collecting field performance" text="LCP, INP and CLS arrive automatically; TTFB remains a diagnostic."/>}</Panel>
     </section>
     <section className="grid gap-4 lg:grid-cols-3">
       <Panel title="Change intelligence" eyebrow="What changed between crawls" icon={IconHistory}>{intelligence.changes.length ? <div className="space-y-1">{intelligence.changes.slice(0,8).map((item,index) => <div key={`${item.pageUrl}-${index}`} className="rounded-lg px-2 py-3 hover:bg-white/[.03]"><p className="text-sm font-medium text-[#dce6e3]">{item.field} changed</p><p className="mt-1 truncate text-[10px] text-[#65736f]">{propertyName(data.properties,item.propertyId)} · {item.pageUrl}</p></div>)}</div> : <Empty icon={IconHistory} title="No crawl changes yet" text="The next crawl will compare titles, metadata, status and SEO scores."/>}</Panel>
@@ -342,8 +381,8 @@ function Panel({ title, eyebrow, icon: Icon, children }: { title: string; eyebro
   return <section className="za-panel min-w-0"><header className="mb-5 flex items-start justify-between gap-4"><div><p className="text-[10px] font-semibold uppercase tracking-[.15em] text-[#65736f]">{eyebrow}</p><h2 className="mt-1.5 text-[1.05rem] font-semibold tracking-[-.025em] text-[#edf5f2]">{title}</h2></div><Icon size={18} className="mt-1 shrink-0 text-[#58e0c0]" stroke={1.7}/></header>{children}</section>;
 }
 
-function Kpi({ label, value, suffix, note, icon: Icon, accent, proxy }: { label: string; value: string; suffix?: string; note: string; icon: typeof IconRadar; accent?: boolean; proxy?: boolean }) {
-  return <article className={`relative bg-[#0d1315] p-4 sm:p-5 ${accent ? "za-kpi-accent" : ""}`}><div className="flex items-center justify-between"><p className="text-[10px] font-semibold uppercase tracking-[.14em] text-[#71807c]">{label}</p><Icon size={17} className={accent ? "text-[#58e0c0]" : "text-[#697874]"}/></div><p className="mt-5 text-3xl font-semibold tracking-[-.05em] tabular-nums sm:text-4xl">{value}<span className="ml-1 text-sm font-medium tracking-normal text-[#71807c]">{suffix}</span></p><div className="mt-2 flex items-center gap-2 text-xs text-[#71807c]"><span>{note}</span>{proxy && <span className="border border-[#efc86b]/25 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-[#efc86b]">proxy</span>}</div></article>;
+function Kpi({ label, value, suffix, note, icon: Icon, accent, proxy, state }: { label: string; value: string; suffix?: string; note: string; icon: typeof IconRadar; accent?: boolean; proxy?: boolean; state?: "current" | "insufficient-sample" }) {
+  return <article className={`relative bg-[#0d1315] p-4 sm:p-5 ${accent ? "za-kpi-accent" : ""}`}><div className="flex items-center justify-between"><p className="text-[10px] font-semibold uppercase tracking-[.14em] text-[#71807c]">{label}</p><Icon size={17} className={accent ? "text-[#58e0c0]" : "text-[#697874]"}/></div><p className="mt-5 text-3xl font-semibold tracking-[-.05em] tabular-nums sm:text-4xl">{value}<span className="ml-1 text-sm font-medium tracking-normal text-[#71807c]">{suffix}</span></p><div className="mt-2 flex items-start gap-2 text-xs text-[#71807c]"><span>{note}</span>{state === "insufficient-sample" && <span className="shrink-0 border border-[#efc86b]/25 px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-wider text-[#efc86b]">low sample</span>}{proxy && <span className="border border-[#efc86b]/25 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-[#efc86b]">proxy</span>}</div></article>;
 }
 
 function TrafficChart({ data, tall }: { data: Dashboard["trend"]; tall?: boolean }) {
@@ -355,7 +394,7 @@ function SearchChart({ data }: { data: Dashboard }) {
 }
 
 function PropertyTable({ data, onSelect }: { data: Dashboard; onSelect: (id: string) => void }) {
-  return <div className="overflow-x-auto"><table className="w-full min-w-[680px] text-left"><thead><tr className="border-b border-white/[.07] text-[10px] uppercase tracking-[.13em] text-[#65736f]"><th className="pb-3 font-semibold">Property</th><th className="pb-3 font-semibold">Health</th><th className="pb-3 text-right font-semibold">Views</th><th className="pb-3 text-right font-semibold">Visitors</th><th className="pb-3 text-right font-semibold">Issues</th><th className="pb-3 text-right font-semibold">Last signal</th></tr></thead><tbody>{data.propertyRollups.map((item) => <tr key={item.propertyId} onClick={() => onSelect(item.propertyId)} className="cursor-pointer border-b border-white/[.055] transition hover:bg-white/[.035] last:border-0"><td className="py-3.5"><p className="text-sm font-medium text-[#e9f1ef]">{item.name}</p><p className="mt-1 text-[11px] text-[#61706c]">{host(item.url)}</p></td><td className="py-3.5"><Health score={item.averageSeoScore}/></td><td className="py-3.5 text-right text-sm tabular-nums">{n(item.pageviews)}</td><td className="py-3.5 text-right text-sm tabular-nums text-[#9caaa6]">{n(item.visitors)}</td><td className="py-3.5 text-right"><span className={item.criticalFindings ? "text-[#ff8178]" : "text-[#899893]"}>{item.totalFindings}</span></td><td className="py-3.5 text-right text-xs text-[#71807c]">{when(item.lastHitAt)}</td></tr>)}</tbody></table></div>;
+  return <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left"><thead><tr className="border-b border-white/[.07] text-[10px] uppercase tracking-[.13em] text-[#65736f]"><th className="pb-3 font-semibold">Property</th><th className="pb-3 font-semibold">Data state</th><th className="pb-3 font-semibold">Health</th><th className="pb-3 text-right font-semibold">Views</th><th className="pb-3 text-right font-semibold">Visitors</th><th className="pb-3 text-right font-semibold">Issues</th><th className="pb-3 text-right font-semibold">Last signal</th></tr></thead><tbody>{data.propertyRollups.map((item) => { const quality = data.dataQuality.properties.find((row) => row.propertyId === item.propertyId)?.tracker ?? { state: "missing", label: "No data", explanation: "No tracker state is available.", observedAt: null, ageMinutes: null }; return <tr key={item.propertyId} onClick={() => onSelect(item.propertyId)} className="cursor-pointer border-b border-white/[.055] transition hover:bg-white/[.035] last:border-0"><td className="py-3.5"><p className="text-sm font-medium text-[#e9f1ef]">{item.name}</p><p className="mt-1 text-[11px] text-[#61706c]">{host(item.url)}</p></td><td className="py-3.5"><DataStateBadge signal={quality} compact /></td><td className="py-3.5">{item.crawledPages ? <Health score={item.averageSeoScore}/> : <span className="text-xs text-[#71807c]">Not crawled</span>}</td><td className="py-3.5 text-right text-sm tabular-nums">{quality.state === "unverified" ? "—" : n(item.pageviews)}</td><td className="py-3.5 text-right text-sm tabular-nums text-[#9caaa6]">{quality.state === "unverified" ? "—" : n(item.visitors)}</td><td className="py-3.5 text-right"><span className={item.criticalFindings ? "text-[#ff8178]" : "text-[#899893]"}>{item.crawledPages ? item.totalFindings : "—"}</span></td><td className="py-3.5 text-right text-xs text-[#71807c]">{relativeTime(item.lastHitAt)}</td></tr>})}</tbody></table></div>;
 }
 
 function OpportunityList({ data, expanded }: { data: Dashboard; expanded?: boolean }) {
@@ -412,9 +451,13 @@ function filterDashboard(data: Dashboard, id: string): Dashboard {
   const properties = data.properties.filter((item) => item.id === id);
   const rollups = data.propertyRollups.filter(owns);
   const propertyComparison = data.propertyComparisons.find((item) => item.propertyId === id);
-  const comparison = propertyComparison ? { pageviews: propertyComparison.pageviewsChange, visitors: propertyComparison.visitorsChange, previousPageviews: propertyComparison.previousPageviews, previousVisitors: propertyComparison.previousVisitors } : { pageviews: 0, visitors: 0, previousPageviews: 0, previousVisitors: 0 };
+  const emptyQuality: ComparisonQuality = { current: 0, previous: 0, change: null, displayPercent: false, state: "insufficient-sample", explanation: "No visits in either period." };
+  const comparison = propertyComparison ? { pageviews: propertyComparison.pageviewsChange, visitors: propertyComparison.visitorsChange, previousPageviews: propertyComparison.previousPageviews, previousVisitors: propertyComparison.previousVisitors, pageviewsQuality: propertyComparison.pageviewsQuality, visitorsQuality: propertyComparison.visitorsQuality } : { pageviews: null, visitors: null, previousPageviews: 0, previousVisitors: 0, pageviewsQuality: emptyQuality, visitorsQuality: emptyQuality };
   const totals = { ...data.totals, properties: properties.length, tracked: properties.filter((item) => item.status === "tracked").length, missingTracker: properties.filter((item) => item.status === "missing-tracker").length, pageviews: rollups.reduce((sum, row) => sum + row.pageviews, 0), visitors: rollups.reduce((sum, row) => sum + row.visitors, 0), crawledPages: rollups.reduce((sum, row) => sum + row.crawledPages, 0), averageSeoScore: rollups[0]?.averageSeoScore ?? 0, brokenPages: rollups.reduce((sum, row) => sum + row.brokenPages, 0), missingTitles: rollups.reduce((sum, row) => sum + row.missingTitles, 0), missingDescriptions: rollups.reduce((sum, row) => sum + row.missingDescriptions, 0), thinPages: rollups.reduce((sum, row) => sum + row.thinPages, 0) };
-  return { ...data, properties, comparison, totals, propertyRollups: rollups, domainRatings: data.domainRatings.filter(owns), authorityScores: data.authorityScores.filter(owns), commonCrawlLinks: data.commonCrawlLinks.filter(owns), topPages: data.topPages.filter(owns), searchPages: data.searchPages.filter(owns), rankVisibility: data.rankVisibility.filter(owns), latestCrawledPages: data.latestCrawledPages.filter(owns), seoFindings: data.seoFindings.filter(owns), keywordCandidates: data.keywordCandidates.filter(owns), referrerDomains: data.referrerDomains.filter(owns), eventSummary: data.eventSummary.filter(owns), recentActivity: data.recentActivity.filter(owns), referrerSummary: data.referrerSummary.filter(owns), deviceSummary: data.deviceSummary.filter(owns), opportunityPages: data.opportunityPages.filter(owns), actionItems: data.actionItems.filter(owns) };
+  const propertyQuality = data.dataQuality.properties.filter(owns);
+  const sources = { ...data.dataQuality.sources, traffic: propertyQuality[0]?.tracker ?? data.dataQuality.sources.traffic, crawler: propertyQuality[0]?.crawler ?? data.dataQuality.sources.crawler };
+  const counts = { unverified: propertyQuality.filter((item) => item.tracker.state === "unverified").length, missingTraffic: propertyQuality.filter((item) => item.tracker.state === "missing").length, staleTraffic: propertyQuality.filter((item) => item.tracker.state === "stale").length, staleSources: Object.values(sources).filter((item) => item.state === "stale").length };
+  return { ...data, properties, comparison, totals, dataQuality: { sources, properties: propertyQuality, counts }, propertyRollups: rollups, domainRatings: data.domainRatings.filter(owns), authorityScores: data.authorityScores.filter(owns), commonCrawlLinks: data.commonCrawlLinks.filter(owns), topPages: data.topPages.filter(owns), searchPages: data.searchPages.filter(owns), rankVisibility: data.rankVisibility.filter(owns), latestCrawledPages: data.latestCrawledPages.filter(owns), seoFindings: data.seoFindings.filter(owns), keywordCandidates: data.keywordCandidates.filter(owns), referrerDomains: data.referrerDomains.filter(owns), eventSummary: data.eventSummary.filter(owns), recentActivity: data.recentActivity.filter(owns), referrerSummary: data.referrerSummary.filter(owns), deviceSummary: data.deviceSummary.filter(owns), opportunityPages: data.opportunityPages.filter(owns), actionItems: data.actionItems.filter(owns) };
 }
 
 function filterIntelligence(data: Intelligence, id: string): Intelligence {

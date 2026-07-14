@@ -60,7 +60,9 @@ For each accepted surface, install the generated tracker snippet only when the s
 
 ## Schedule
 
-Create one daily Zo Agent automation in the user's timezone. Use the exact workflow in `references/automation-prompt.md`. Schedule Common Crawl separately once per week; it automatically no-ops when the current release is already stored.
+The installed app refreshes its own data automatically: `backend-lib/scheduler.ts` starts an in-process timer from `server.ts` (skipped in collector-only mode) that runs `crawl --all`, `common-crawl-sync`, `ahrefs-sync`, and `intelligence all` every Monday in the account owner's timezone, with no AI or external cron involved. No separate setup step is needed for this.
+
+Discovering new public surfaces still needs a Zo Agent, since it requires Zo's native Space/Sites/Services inventory tools, which are not reachable from a plain subprocess. Create one daily Zo Agent automation for discovery only, using the exact workflow in `references/automation-prompt.md`.
 
 ## Verify
 

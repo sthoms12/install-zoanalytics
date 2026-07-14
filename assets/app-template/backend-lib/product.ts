@@ -1,4 +1,5 @@
 import { db, getProperties, getProperty, APP_VERSION } from "./db";
+import { FIXABLE_CODES } from "./fixes";
 
 type FunnelStep = { type: "page" | "event"; value: string };
 
@@ -81,6 +82,7 @@ export function getActionCenter() {
     title: item.message, why: item.severity === "critical" ? "This can prevent discovery or a reliable visit." : "Resolving this improves clarity, accessibility, or search presentation.",
     evidence: `${item.code.replaceAll("_", " ")} detected during the latest crawl.`, fix: fixes[item.code] ?? "Review the affected page and rerun the audit after correcting it.",
     impact: item.severity === "critical" ? 5 : item.severity === "warning" ? 3 : 2, confidence: 5, effort: ["missing_title", "missing_description", "missing_h1", "missing_canonical", "missing_alt"].includes(item.code) ? 1 : 3,
+    fixCode: (FIXABLE_CODES as readonly string[]).includes(item.code) ? item.code : null,
   });
   const errors = db.query(`SELECT property_id AS propertyId, path, message, COUNT(*) AS occurrences FROM client_errors
     WHERE created_at >= datetime('now','-7 days') GROUP BY property_id, path, message HAVING COUNT(*) >= 3 ORDER BY occurrences DESC LIMIT 20`).all() as Array<Record<string, string | number>>;

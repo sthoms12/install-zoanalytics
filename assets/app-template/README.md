@@ -21,6 +21,10 @@ No paid analytics or SEO API is required.
 - The Action Center orders evidence-backed recommendations by impact, confidence, and effort.
 - Unified page detail combines traffic, events, p75 field performance, technical findings, observed rankings, links, changes, and errors.
 - Goals, ordered funnels, stored weekly briefs, and CSV exports are managed from the private dashboard.
+- The Change-to-Outcome Ledger lines up commits, crawler-detected content edits, tracker installs, and applied fixes against 7-day before/after traffic, engagement, Core Web Vitals, and SEO score deltas.
+- The Safe Fix Laboratory previews, applies, and reverts title, description, canonical, and noindex fixes directly on an eligible property's `index.html`, skipping properties with custom per-route SEO rendering.
+- A built-in weekly scheduler re-crawls properties and refreshes Common Crawl, Ahrefs, and intelligence data every Monday with no AI or external cron involved.
+- Every source and property reports an explicit data state: live, current, stale, missing, unverified, or insufficient sample. Zero-baseline comparisons use absolute explanations instead of invented percentages, and low-sample Web Vitals and Ledger outcomes remain visibly pending.
 
 ## Public-only discovery
 
@@ -41,9 +45,12 @@ bun run crawl -- --max-pages 20
 bun run intelligence all
 bun run pulse-refresh
 bun run common-crawl-sync --metadata-only
+bun run ahrefs-sync
 bun run doctor
 bun run backup
 ```
+
+Weekly data refresh runs on its own once the app is running; see `AGENTS.md`.
 
 The installer update workflow runs a backup before replacing application source and preserves `data/`, `.env`, and `zosite.json`.
 
