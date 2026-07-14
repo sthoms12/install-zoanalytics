@@ -45,4 +45,6 @@ Keep the five-area dashboard navigation and its nested tabs aligned with URL sta
 
 Dashboard data loading is section-aware: `/api/analytics/summary` provides the portfolio shell and supporting APIs load only for the active workflow. Preserve AbortController cancellation when period or section changes supersede an in-flight request. Production chunks are split in `vite.config.ts`.
 
+Workspace Site discovery must anonymously verify the derived `*.zocomputer.io` URL before creating or reactivating a property. A publish block in `zosite.json` does not prove the service is public or currently deployed; unreachable workspace-site rows are retired so private `*.zo.computer` dashboards never become tracker gaps.
+
 `getActionCenter()` remains the atomic action source. `getActionCampaigns()` groups open actions into work campaigns, and `setActionCampaignState()` updates every child in one SQLite transaction. Keep source verification distinct from manually marking a campaign resolved.

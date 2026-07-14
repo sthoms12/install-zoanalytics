@@ -91,8 +91,13 @@ export async function discoverProperties() {
       if (config.publish.public === false || config.publish.env?.ZOANALYTICS_COLLECTOR_ONLY === "true" || config.publish.label === "zoanalytics") { skipped.push({ projectPath, reason: "private-or-collector" }); continue; }
       const propertyId = slug(config.name || config.publish.label);
       if (!ownerHandle) { skipped.push({ projectPath, reason: "owner-handle-required" }); continue; }
-      if (existing.has(propertyId)) { db.prepare("UPDATE properties SET last_discovered_at=CURRENT_TIMESTAMP, lifecycle='active', retired_at=NULL WHERE id=?").run(propertyId); continue; }
       const url = `https://${config.publish.label}-${ownerHandle}.zocomputer.io`;
+      if (!await reachableWithoutAuth(new URL(url))) {
+        skipped.push({ projectPath, reason: "not-publicly-reachable" });
+        db.prepare("UPDATE properties SET lifecycle='retired', retired_at=COALESCE(retired_at, CURRENT_TIMESTAMP), updated_at=CURRENT_TIMESTAMP WHERE id=? AND tags LIKE '%workspace-site%'").run(propertyId);
+        continue;
+      }
+      if (existing.has(propertyId)) { db.prepare("UPDATE properties SET last_discovered_at=CURRENT_TIMESTAMP, lifecycle='active', retired_at=NULL WHERE id=?").run(propertyId); continue; }
       upsertDiscoveredProperty({ id: propertyId, name: config.name || config.publish.label, kind: "site", url, projectPath, source: "workspace-site" });
       existing.add(propertyId);
       discovered.push({ id: propertyId, name: config.name || config.publish.label, url, projectPath, status: "missing-tracker" });

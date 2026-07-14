@@ -25,8 +25,8 @@ export function getSetupStatus() {
       COUNT(*) AS total,
       COALESCE(SUM(CASE WHEN verified_at IS NOT NULL OR status='tracked' THEN 1 ELSE 0 END), 0) AS verified,
       COALESCE(SUM(CASE WHEN lifecycle='active' THEN 1 ELSE 0 END), 0) AS active
-    FROM properties WHERE url LIKE 'http%'`).get() as { total: number; verified: number; active: number };
-  const crawled = db.query("SELECT COUNT(DISTINCT property_id) AS count FROM crawl_runs WHERE status='completed'").get() as { count: number };
+    FROM properties WHERE lifecycle='active' AND url LIKE 'http%'`).get() as { total: number; verified: number; active: number };
+  const crawled = db.query("SELECT COUNT(DISTINCT crawl_runs.property_id) AS count FROM crawl_runs JOIN properties ON properties.id=crawl_runs.property_id WHERE crawl_runs.status='completed' AND properties.lifecycle='active'").get() as { count: number };
   const goals = db.query("SELECT COUNT(*) AS count FROM goals WHERE active=1").get() as { count: number };
   const latestDiscovery = db.query("SELECT MAX(last_discovered_at) AS at FROM properties").get() as { at: string | null };
   const steps = [

@@ -29,6 +29,7 @@ No paid analytics or SEO API is required.
 - The Overview is a decision brief: portfolio movement, confidence-gated wins and regressions, changes still gathering evidence, top work campaigns, trust exceptions, and direct paths into property workspaces.
 - Five primary areas—Overview, Audience, Visibility, Improve, and Outcomes—organize every report into nested workflow tabs; Public Pulse and data operations remain available from the secondary menu.
 - The portfolio shell loads first and only the active workflow requests its supporting APIs; superseded requests are cancelled and production bundles are split by runtime, charts, icons, and vendor code.
+- Workspace Site discovery confirms the derived public URL is anonymously reachable before activation and retires stale workspace-site rows when a public deployment no longer exists; private `*.zo.computer` dashboards never become tracker gaps.
 
 ## Public-only discovery
 
