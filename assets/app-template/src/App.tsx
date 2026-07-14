@@ -14,7 +14,7 @@ import {
 } from "@tabler/icons-react";
 import { ThemeProvider } from "@/components/theme-provider";
 import { DataStateBadge, FreshnessLabel, SampleWarning, relativeTime, type DataQualitySignal } from "@/components/data-state";
-import { ActionCenter, Ledger, Outcomes, PageExplorer, PulseSettings, SetupGuide, type ActionData, type BriefData, type FunnelData, type LedgerEvent, type SetupData } from "@/product";
+import { ActionCenter, Ledger, Outcomes, PageExplorer, PulseSettings, SetupGuide, type ActionCampaignData, type BriefData, type FunnelData, type LedgerEvent, type SetupData } from "@/product";
 
 type Property = {
   id: string; name: string; kind: "space" | "site" | "service" | "external"; url: string;
@@ -121,7 +121,7 @@ function DashboardApp() {
   const [data, setData] = useState<Dashboard | null>(null);
   const [intelligence, setIntelligence] = useState<Intelligence | null>(null);
   const [setup, setSetup] = useState<SetupData | null>(null);
-  const [actions, setActions] = useState<ActionData[]>([]);
+  const [actionCampaigns, setActionCampaigns] = useState<ActionCampaignData[]>([]);
   const [funnels, setFunnels] = useState<FunnelData[]>([]);
   const [briefs, setBriefs] = useState<BriefData[]>([]);
   const [ledger, setLedger] = useState<LedgerEvent[]>([]);
@@ -135,18 +135,18 @@ function DashboardApp() {
   async function load() {
     setLoading(true); setError("");
     try {
-      const [summaryResponse, intelligenceResponse, setupResponse, actionsResponse, funnelsResponse, briefsResponse, ledgerResponse] = await Promise.all([
+      const [summaryResponse, intelligenceResponse, setupResponse, campaignsResponse, funnelsResponse, briefsResponse, ledgerResponse] = await Promise.all([
         fetch(`/api/analytics/summary?days=${days}`, { headers: { Accept: "application/json" } }),
         fetch("/api/analytics/intelligence", { headers: { Accept: "application/json" } }),
         fetch("/api/analytics/setup", { headers: { Accept: "application/json" } }),
-        fetch("/api/analytics/actions", { headers: { Accept: "application/json" } }),
+        fetch("/api/analytics/action-campaigns", { headers: { Accept: "application/json" } }),
         fetch("/api/analytics/funnels", { headers: { Accept: "application/json" } }),
         fetch("/api/analytics/briefs", { headers: { Accept: "application/json" } }),
         fetch("/api/analytics/ledger", { headers: { Accept: "application/json" } }),
       ]);
-      if (![summaryResponse, intelligenceResponse, setupResponse, actionsResponse, funnelsResponse, briefsResponse, ledgerResponse].every((response) => response.ok)) throw new Error("One or more dashboard signals could not be read");
-      const [summary, signals, setupState, actionState, funnelState, briefState, ledgerState] = await Promise.all([summaryResponse.json(), intelligenceResponse.json(), setupResponse.json(), actionsResponse.json(), funnelsResponse.json(), briefsResponse.json(), ledgerResponse.json()]);
-      setData(summary); setIntelligence(signals); setSetup(setupState); setActions(actionState.actions); setFunnels(funnelState.funnels); setBriefs(briefState.briefs); setLedger(ledgerState.events);
+      if (![summaryResponse, intelligenceResponse, setupResponse, campaignsResponse, funnelsResponse, briefsResponse, ledgerResponse].every((response) => response.ok)) throw new Error("One or more dashboard signals could not be read");
+      const [summary, signals, setupState, campaignState, funnelState, briefState, ledgerState] = await Promise.all([summaryResponse.json(), intelligenceResponse.json(), setupResponse.json(), campaignsResponse.json(), funnelsResponse.json(), briefsResponse.json(), ledgerResponse.json()]);
+      setData(summary); setIntelligence(signals); setSetup(setupState); setActionCampaigns(campaignState.campaigns); setFunnels(funnelState.funnels); setBriefs(briefState.briefs); setLedger(ledgerState.events);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Dashboard request failed"); }
     finally { setLoading(false); }
   }
@@ -222,7 +222,7 @@ function DashboardApp() {
           </>}
 
           {view === "overview" && <Overview data={filtered} name={name} onSelectProperty={setProperty} />}
-          {view === "actions" && <ActionCenter actions={actions.filter((item) => property === "all" || item.propertyId === property)} properties={data.properties} onRefresh={load} />}
+          {view === "actions" && <ActionCenter campaigns={actionCampaigns.filter((item) => property === "all" || item.propertyId === property)} properties={data.properties} onRefresh={load} />}
           {view === "traffic" && <Traffic data={filtered} />}
           {view === "content" && <Content data={filtered} />}
           {view === "seo" && <SearchLinks data={filtered} />}

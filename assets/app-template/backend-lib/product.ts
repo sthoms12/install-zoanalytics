@@ -3,6 +3,12 @@ import { FIXABLE_CODES } from "./fixes";
 
 type FunnelStep = { type: "page" | "event"; value: string };
 
+export type AtomicAction = {
+  key: string; propertyId: string; pageUrl: string; category: string; severity: string; title: string;
+  why: string; evidence: string; fix: string; impact: number; confidence: number; effort: number;
+  fixCode: string | null; priority: number; state: string; snoozedUntil: string | null; note: string | null;
+};
+
 function stableKey(parts: Array<string | number | null | undefined>) {
   return parts.filter(Boolean).join(":").toLowerCase().replace(/[^a-z0-9:_-]+/g, "-").slice(0, 240);
 }
@@ -60,7 +66,7 @@ function actionState(actionKey: string) {
   return db.query("SELECT status, snoozed_until AS snoozedUntil, note FROM action_states WHERE action_key=?").get(actionKey) as { status: string; snoozedUntil: string | null; note: string | null } | null;
 }
 
-export function getActionCenter() {
+export function getActionCenter(): AtomicAction[] {
   const actions: Array<Record<string, unknown>> = [];
   for (const property of getProperties().filter((item) => item.url.startsWith("http"))) {
     if (property.status !== "tracked") actions.push({
@@ -94,8 +100,77 @@ export function getActionCenter() {
   return actions.map((item) => {
     const key = String(item.key); const state = actionState(key);
     const priority = Number(item.impact) * Number(item.confidence) * 4 - Number(item.effort) * 3;
-    return { ...item, priority, state: state?.status ?? "open", snoozedUntil: state?.snoozedUntil ?? null, note: state?.note ?? null };
+    return { ...item, fixCode: item.fixCode ? String(item.fixCode) : null, priority, state: state?.status ?? "open", snoozedUntil: state?.snoozedUntil ?? null, note: state?.note ?? null } as AtomicAction;
   }).filter((item) => item.state === "open" && (!item.snoozedUntil || new Date(item.snoozedUntil) <= new Date())).sort((a, b) => b.priority - a.priority);
+}
+
+export type ActionCampaign = {
+  key: string;
+  propertyId: string;
+  category: string;
+  severity: string;
+  title: string;
+  rationale: string;
+  recommendedFix: string;
+  affectedPages: number;
+  representativeEvidence: string;
+  priority: number;
+  effort: number;
+  fixability: "fixable" | "partially-fixable" | "manual";
+  fixCode: string | null;
+  childKeys: string[];
+  actions: AtomicAction[];
+};
+
+const severityRank: Record<string, number> = { critical: 3, warning: 2, info: 1 };
+
+function campaignTitle(action: AtomicAction, count: number) {
+  const subject = count === 1 ? "page" : `${count} pages`;
+  if (action.category === "tracking") return `Verify analytics on ${count === 1 ? "this property" : `${count} properties`}`;
+  const code = action.fixCode ?? String(action.key).split(":")[2] ?? "finding";
+  const titles: Record<string, string> = {
+    missing_title: `Add missing titles to ${subject}`,
+    missing_description: `Add meta descriptions to ${subject}`,
+    missing_h1: `Add a clear heading to ${subject}`,
+    missing_canonical: `Add canonical URLs to ${subject}`,
+    noindex: `Review noindex on ${subject}`,
+    bad_status: `Repair broken responses on ${subject}`,
+    thin_content: `Improve thin content on ${subject}`,
+    missing_alt: `Add image descriptions on ${subject}`,
+    slow_response: `Improve response time on ${subject}`,
+  };
+  return titles[code] ?? (action.category === "reliability" ? `Investigate repeated browser errors on ${subject}` : `${action.title} · ${subject}`);
+}
+
+export function getActionCampaigns(): ActionCampaign[] {
+  const groups = new Map<string, AtomicAction[]>();
+  for (const action of getActionCenter()) {
+    const actionCode = action.fixCode ?? String(action.key).split(":")[2] ?? String(action.title);
+    const groupKey = stableKey(["campaign", action.propertyId, action.category, actionCode, action.fix, action.fixCode ? "safe-fix" : "manual"]);
+    groups.set(groupKey, [...(groups.get(groupKey) ?? []), action]);
+  }
+  return [...groups.entries()].map(([key, actions]) => {
+    const representative = actions[0];
+    const fixableCount = actions.filter((action) => Boolean(action.fixCode)).length;
+    const fixability: ActionCampaign["fixability"] = fixableCount === actions.length ? "fixable" : fixableCount ? "partially-fixable" : "manual";
+    return {
+      key,
+      propertyId: String(representative.propertyId),
+      category: String(representative.category),
+      severity: actions.reduce((highest, action) => severityRank[String(action.severity)] > severityRank[highest] ? String(action.severity) : highest, "info"),
+      title: campaignTitle(representative, actions.length),
+      rationale: String(representative.why),
+      recommendedFix: String(representative.fix),
+      affectedPages: new Set(actions.map((action) => String(action.pageUrl))).size,
+      representativeEvidence: String(representative.evidence),
+      priority: Math.max(...actions.map((action) => Number(action.priority))),
+      effort: Math.max(...actions.map((action) => Number(action.effort))),
+      fixability,
+      fixCode: fixability === "fixable" ? String(representative.fixCode) : null,
+      childKeys: actions.map((action) => String(action.key)),
+      actions,
+    };
+  }).sort((a, b) => b.priority - a.priority || b.affectedPages - a.affectedPages);
 }
 
 export function setActionState(actionKey: string, status: "open" | "dismissed" | "resolved", snoozedUntil?: string, note?: string) {
@@ -104,6 +179,19 @@ export function setActionState(actionKey: string, status: "open" | "dismissed" |
     ON CONFLICT(action_key) DO UPDATE SET status=excluded.status, snoozed_until=excluded.snoozed_until, note=excluded.note, updated_at=CURRENT_TIMESTAMP`)
     .run(actionKey, effectiveStatus, snoozedUntil ?? null, note?.slice(0, 500) ?? null);
   return { ok: true };
+}
+
+export function setActionCampaignState(campaignKey: string, status: "open" | "dismissed" | "resolved", snoozedUntil?: string, note?: string) {
+  const campaign = getActionCampaigns().find((item) => item.key === campaignKey);
+  if (!campaign) throw new Error("Action campaign not found");
+  const effectiveStatus = snoozedUntil ? "open" : status;
+  const statement = db.prepare(`INSERT INTO action_states (action_key, status, snoozed_until, note) VALUES (?, ?, ?, ?)
+    ON CONFLICT(action_key) DO UPDATE SET status=excluded.status, snoozed_until=excluded.snoozed_until, note=excluded.note, updated_at=CURRENT_TIMESTAMP`);
+  const transaction = db.transaction(() => {
+    for (const actionKey of campaign.childKeys) statement.run(actionKey, effectiveStatus, snoozedUntil ?? null, note?.slice(0, 500) ?? null);
+  });
+  transaction();
+  return { ok: true, updated: campaign.childKeys.length };
 }
 
 export function getPageDetail(propertyId: string, path: string) {
@@ -186,6 +274,7 @@ export function exportRows(dataset: string) {
     pages: "SELECT property_id,url,path,status_code,title,description,h1,canonical,robots,word_count,seo_score,captured_at FROM crawled_pages ORDER BY captured_at DESC",
     findings: "SELECT property_id,page_url,severity,code,message,created_at FROM seo_findings ORDER BY created_at DESC",
     backlinks: "SELECT property_id,source_url,target_url,first_seen_at,last_seen_at,status,visits FROM discovered_backlinks ORDER BY last_seen_at DESC",
+    ledger: "SELECT property_id,source,kind,title,detail,page_url,occurred_at FROM change_events ORDER BY occurred_at DESC",
   };
   if (!queries[dataset]) return null;
   return db.query(queries[dataset]).all() as Array<Record<string, unknown>>;

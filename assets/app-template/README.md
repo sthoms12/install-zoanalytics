@@ -18,7 +18,7 @@ No paid analytics or SEO API is required.
 
 - Guided setup discovers public surfaces, verifies tracker HTML without generating synthetic visits, runs a baseline crawl, and confirms goals.
 - A separate Public Pulse view publishes only explicitly enabled properties and aggregate metrics.
-- The Action Center orders evidence-backed recommendations by impact, confidence, and effort.
+- The Action Center groups repeated findings into executable campaigns ordered by impact, confidence, and effort while retaining page-level evidence and Safe Fix controls.
 - Unified page detail combines traffic, events, p75 field performance, technical findings, observed rankings, links, changes, and errors.
 - Goals, ordered funnels, stored weekly briefs, and CSV exports are managed from the private dashboard.
 - The Change-to-Outcome Ledger lines up commits, crawler-detected content edits, tracker installs, and applied fixes against 7-day before/after traffic, engagement, Core Web Vitals, and SEO score deltas.

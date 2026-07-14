@@ -36,3 +36,5 @@ Discovery reads `data/discovery-manifest.json` and writes `data/discovery-status
 `backend-lib/scheduler.ts` starts automatically from `server.ts` (outside collector-only mode) and re-runs `crawl`, `common-crawl-sync`, `ahrefs-sync`, and `intelligence all` every Monday in the account owner's timezone. It needs no scheduled automation of its own. `ahrefs-sync` is a no-op failure when the account has no Ahrefs MCP connector; the other steps still run.
 
 `backend-lib/confidence.ts` owns data-state interpretation. Traffic is live for 15 minutes and current for 48 hours; crawler, rankings, backlinks, authority, and Pulse snapshots are current for eight days; Ledger outcomes use a 30-day freshness window. A zero previous baseline never produces a percentage, and Core Web Vitals remain insufficient until five observations exist. Keep these rules consistent across the API and dashboard.
+
+`getActionCenter()` remains the atomic action source. `getActionCampaigns()` groups open actions into work campaigns, and `setActionCampaignState()` updates every child in one SQLite transaction. Keep source verification distinct from manually marking a campaign resolved.

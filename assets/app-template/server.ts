@@ -6,7 +6,7 @@ import { Hono } from "hono";
 import { getDashboard, getProperties, recordHit, type CollectPayload } from "./backend-lib/db";
 import { crawlAllPublicProperties, crawlProperty } from "./backend-lib/crawler";
 import { addCompetitor, addRankKeyword, createGoal, createWeeklyReport, discoverProperties, discoverWebBacklinks, getIntelligence, recordRank, runRankChecks } from "./backend-lib/intelligence";
-import { createFunnel, exportRows, getActionCenter, getBriefs, getPageDetail, getSetupStatus, listFunnels, rowsToCsv, setActionState, verifyTracker } from "./backend-lib/product";
+import { createFunnel, exportRows, getActionCampaigns, getActionCenter, getBriefs, getPageDetail, getSetupStatus, listFunnels, rowsToCsv, setActionCampaignState, setActionState, verifyTracker } from "./backend-lib/product";
 import { addExternalProperty, discoverExternalProperties, getExternalSources } from "./backend-lib/external";
 import { getPublicPulse, listPulseConfig, pulsePageHtml, refreshPulseSnapshot, updatePulseConfig } from "./backend-lib/pulse";
 import { deleteChangeEvent, getLedger, logManualChangeEvent } from "./backend-lib/ledger";
@@ -68,6 +68,26 @@ app.patch("/api/analytics/pulse/config/:propertyId", async (c) => {
 });
 app.post("/api/analytics/pulse/refresh", (c) => c.json({ snapshot: refreshPulseSnapshot() }));
 app.get("/api/analytics/actions", (c) => c.json({ actions: getActionCenter() }));
+app.get("/api/analytics/action-campaigns", (c) => c.json({ campaigns: getActionCampaigns() }));
+app.patch("/api/analytics/action-campaigns/:key", async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  if (!["open", "dismissed", "resolved"].includes(body.status)) return c.json({ error: "Valid status is required" }, 400);
+  try { return c.json(setActionCampaignState(c.req.param("key"), body.status, body.snoozedUntil, body.note)); }
+  catch (error) { return c.json({ error: error instanceof Error ? error.message : "Could not update campaign" }, 404); }
+});
+app.post("/api/analytics/action-campaigns/:key/verify", async (c) => {
+  const campaign = getActionCampaigns().find((item) => item.key === c.req.param("key"));
+  if (!campaign) return c.json({ error: "Action campaign not found" }, 404);
+  if (campaign.category === "tracking") {
+    const results = await Promise.all([...new Set(campaign.actions.map((item) => item.propertyId))].map((propertyId) => verifyTracker(propertyId, collectorOrigin)));
+    return c.json({ verified: results.every((item) => item.ok), results, campaign: getActionCampaigns().find((item) => item.key === campaign.key) ?? null });
+  }
+  if (campaign.category === "site audit") {
+    await crawlProperty(campaign.propertyId, 20);
+    return c.json({ verified: !getActionCampaigns().some((item) => item.key === campaign.key), campaign: getActionCampaigns().find((item) => item.key === campaign.key) ?? null });
+  }
+  return c.json({ error: "This campaign needs manual verification" }, 400);
+});
 app.patch("/api/analytics/actions/:key", async (c) => {
   const body = await c.req.json().catch(() => ({}));
   if (!["open", "dismissed", "resolved"].includes(body.status)) return c.json({ error: "Valid status is required" }, 400);
