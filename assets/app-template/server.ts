@@ -5,7 +5,7 @@ import config from "./zosite.json";
 import { Hono } from "hono";
 import { getDashboard, getProperties, recordHit, type CollectPayload } from "./backend-lib/db";
 import { crawlAllPublicProperties, crawlProperty } from "./backend-lib/crawler";
-import { addCompetitor, addRankKeyword, createGoal, createWeeklyReport, discoverProperties, discoverWebBacklinks, getIntelligence, recordRank, runRankChecks } from "./backend-lib/intelligence";
+import { addCompetitor, addRankKeyword, createGoal, discoverProperties, discoverWebBacklinks, getIntelligence, recordRank, runRankChecks } from "./backend-lib/intelligence";
 import { createFunnel, exportRows, getActionCampaigns, getActionCenter, getBriefs, getPageDetail, getSetupStatus, listFunnels, rowsToCsv, setActionCampaignState, setActionState, verifyTracker } from "./backend-lib/product";
 import { addExternalProperty, discoverExternalProperties, getExternalSources } from "./backend-lib/external";
 import { getPublicPulse, listPulseConfig, pulsePageHtml, refreshPulseSnapshot, updatePulseConfig } from "./backend-lib/pulse";
@@ -17,6 +17,7 @@ import { getPropertyWorkspace } from "./backend-lib/workspace";
 import { listSurfaceInventory, persistSurfaceInventory } from "./backend-lib/surfaces";
 import { applyTrackerInstall, previewTrackerInstall } from "./backend-lib/tracker-install";
 import { listCampaignOutcomes, recordCampaignVerification, reopenCampaignOutcome } from "./backend-lib/campaign-outcomes";
+import { createWeeklyOwnerBrief } from "./backend-lib/weekly-brief";
 
 type Mode = "development" | "production";
 const app = new Hono();
@@ -194,7 +195,7 @@ app.post("/api/analytics/competitors", async (c) => {
   if (typeof body.propertyId !== "string" || typeof body.name !== "string" || typeof body.domain !== "string") return c.json({ error: "propertyId, name, and domain are required" }, 400);
   return c.json(addCompetitor(body), 201);
 });
-app.post("/api/analytics/reports/weekly", (c) => c.json(createWeeklyReport(), 201));
+app.post("/api/analytics/reports/weekly", async (c) => c.json(await createWeeklyOwnerBrief(), 201));
 app.post("/api/analytics/maintenance/ranks", async (c) => c.json({ results: await runRankChecks() }));
 app.post("/api/analytics/maintenance/backlinks", async (c) => c.json({ results: await discoverWebBacklinks() }));
 app.post("/api/analytics/crawl", async (c) => {

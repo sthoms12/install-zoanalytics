@@ -12,6 +12,7 @@ const STEPS: { label: string; cmd: string[] }[] = [
   { label: "common-crawl-sync", cmd: ["bun", "scripts/common-crawl-sync.ts"] },
   { label: "ahrefs-sync", cmd: ["bun", "scripts/ahrefs-sync.ts"] },
   { label: "intelligence-all", cmd: ["bun", "scripts/intelligence.ts", "all"] },
+  { label: "weekly-owner-brief", cmd: ["bun", "scripts/weekly-brief.ts"] },
 ];
 
 const WEEKDAY_INDEX: Record<string, number> = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 };
