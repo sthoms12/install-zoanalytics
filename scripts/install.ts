@@ -17,6 +17,9 @@ const label = value("--label") ?? "zoanalytics";
 const ownerHandle = value("--owner-handle")?.trim();
 const template = resolve(import.meta.dir, "../assets/app-template");
 
+const preflight = Bun.spawnSync(["bun", join(import.meta.dir, "preflight.ts"), "--mode", "install", "--target", target], { stdout: "inherit", stderr: "inherit" });
+if (preflight.exitCode !== 0) throw new Error("Preflight failed; installation was not started");
+
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error("--port must be an integer between 1024 and 65535");
 if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(label)) throw new Error("--label must contain lowercase letters, numbers, and hyphens");
 if (existsSync(target) && readdirSync(target).length > 0) throw new Error(`Target is not empty: ${target}`);
@@ -40,4 +43,5 @@ if (!process.argv.includes("--skip-install")) {
   if (install.exitCode !== 0) throw new Error("bun install failed");
 }
 
-console.log(JSON.stringify({ ok: true, target, port, label, cleanDatabase: true }, null, 2));
+const release = await Bun.file(resolve(import.meta.dir, "../release.json")).json();
+console.log(JSON.stringify({ ok: true, target, port, label, cleanDatabase: true, release }, null, 2));

@@ -1,6 +1,6 @@
 # ZoAnalytics
 
-Private, first-party analytics and SEO intelligence for anything you host on your own [Zo Computer](https://zo.computer) — Zo Space routes, published Zo Sites, public HTTP services, or external Cloudflare/GitHub sites. No third-party trackers, no shared database, no vendor lock-in. Your data stays on your Zo.
+The analytics and website-intelligence system built for [Zo Computer](https://zo.computer). ZoAnalytics discovers what you run, measures what visitors experience, identifies what needs attention, helps you apply safe fixes, verifies the result, and learns from the outcome. Your data stays on your Zo.
 
 **Live example:** [zoanalytics-thomstech.zocomputer.io/pulse](https://zoanalytics-thomstech.zocomputer.io/pulse) — the public, opt-in snapshot view of a real running instance. It shows only aggregated metrics an owner chooses to publish (pageviews, visitors, trend, audit score); the private dashboard behind it stays authenticated and off-limits.
 
@@ -11,6 +11,8 @@ Private, first-party analytics and SEO intelligence for anything you host on you
 - An optional public **Pulse** page for showing off aggregate stats without exposing the dashboard
 - Automatic weekly crawl, Common Crawl sync, Ahrefs sync (if connected), and intelligence refresh — no external cron needed
 - Discovery that only ever includes surfaces Zo confirms are public; private routes and services are never touched
+- A closed Zo-native loop: **Discover → Measure → Diagnose → Fix → Verify → Learn**
+- Evidence-backed weekly owner briefs with the top three priorities, no LLM required
 
 ## Install (on your own Zo)
 
@@ -51,4 +53,4 @@ Every install starts with zero properties and an empty database — nothing is c
 bun run scripts/update.ts --target /home/workspace/zoanalytics
 ```
 
-Backs up first, replaces application source, preserves your `data/`, `.env`, and `zosite.json`.
+Runs preflight, backs up the database and prior source, preserves your database, Pulse choices, `.env`, and `zosite.json`, then builds and runs the doctor. Failed updates restore the previous application source automatically.

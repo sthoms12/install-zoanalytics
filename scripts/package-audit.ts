@@ -37,6 +37,11 @@ for (const path of candidates) {
   }
 }
 
+for (const path of files(root).filter((item) => !item.includes("/assets/app-template/") && !item.includes("/.git/") && !item.endsWith("bun.lock"))) {
+  const content = readFileSync(path, "utf8");
+  if (/\b(?:sk|ghp|github_pat|xox[baprs])-[-_A-Za-z0-9]{12,}\b/.test(content)) errors.push(`Credential-like value in ${relative(root, path)}`);
+}
+
 const result = { ok: errors.length === 0, files: candidates.length, template: relative(root, template), errors };
 console.log(JSON.stringify(result, null, 2));
 if (errors.length) process.exit(1);

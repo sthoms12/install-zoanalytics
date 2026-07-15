@@ -1,0 +1,12 @@
+{
+  "version": "0.13.0",
+  "released_at": "2026-07-15",
+  "minimum_bun": "1.3.0",
+  "summary": "Zo-first discovery, change receipts, executable campaigns, outcome checkpoints, deterministic weekly owner briefs, and hardened lifecycle tooling.",
+  "highlights": [
+    "Discovers and classifies Zo Space routes, Sites, services, aliases, and external production surfaces",
+    "Connects changes and fixes to evidence-backed follow-up outcomes",
+    "Generates a deterministic weekly owner brief without an LLM",
+    "Preserves the embedded SQLite database and opt-in Pulse configuration during updates"
+  ]
+}

@@ -25,9 +25,10 @@ Install the bundled app template into a new workspace folder and configure publi
 
 1. Inspect the workspace index and choose an unused local port and service label.
 2. Determine the current Zo handle from account context. Do not infer another user's handle from bundled files.
-3. Run:
+3. Run the preflight, then install:
 
 ```bash
+bun run scripts/preflight.ts --mode install --target /home/workspace/zoanalytics
 bun run scripts/install.ts \
   --target /home/workspace/zoanalytics \
   --port PORT \
@@ -75,6 +76,16 @@ bun run external-discovery
 bun run crawl -- --max-pages 5
 ```
 
+After the private dashboard and public collector are hosted, verify the separation with:
+
+```bash
+bun run scripts/verify.ts \
+  --private-origin http://127.0.0.1:PRIVATE_DASHBOARD_PORT \
+  --public-origin https://PUBLIC-COLLECTOR.zocomputer.io
+```
+
+Use the private service's local port so verification reaches the application behind Zo's owner-authentication gate without weakening that gate.
+
 Confirm:
 
 - No personal identifier from the source repository appears in the installed tree.
@@ -96,4 +107,4 @@ Run:
 bun run scripts/update.ts --target /home/workspace/zoanalytics
 ```
 
-The updater requires an existing database, runs the installed app's backup command first, replaces application source from the bundled release, preserves `data/`, `.env`, and `zosite.json`, installs the locked dependencies, and requires a successful production build before completion. Run `bun run doctor` in the installed app after updating.
+The updater runs preflight and a database backup, snapshots the prior application source, preserves the database, Pulse choices, `.env`, and `zosite.json`, installs locked dependencies, type-checks, builds, and runs the layered doctor. If any step fails, it restores the prior source automatically and reports the rollback location. The successful result includes the release version and readable update summary.
