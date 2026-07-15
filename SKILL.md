@@ -38,8 +38,16 @@ bun run scripts/install.ts \
 
 4. Run `bun run build` in the installed app.
 5. Confirm the first launch reports zero properties and creates a new ignored `data/zoanalytics.db`.
-6. Publish the Zo Site as the public collector with `ZOANALYTICS_COLLECTOR_ONLY=true`. Keep the dashboard in its private Zo Site preview unless a separate authenticated deployment is deliberately configured.
-7. Set `ZOANALYTICS_PUBLIC_ORIGIN` for the private dashboard to the collector's final HTTPS origin.
+6. Ask whether the owner wants to start fresh or migrate existing history. Migration is optional and must begin with a dry run:
+
+```bash
+bun run migrate -- --source umami --property PROPERTY_ID --file /absolute/path/export.csv
+bun run migrate -- --source plausible --property PROPERTY_ID --file /absolute/path/export.csv
+```
+
+Review the mode, date range, valid/skipped rows, warnings, and duplicate state. Add `--commit` only after the owner approves the preview. Umami raw events may populate historical pageviews/events. Plausible aggregate reports stay aggregate and must never be expanded into invented sessions.
+7. Publish the Zo Site as the public collector with `ZOANALYTICS_COLLECTOR_ONLY=true`. Keep the dashboard in its private Zo Site preview unless a separate authenticated deployment is deliberately configured.
+8. Set `ZOANALYTICS_PUBLIC_ORIGIN` for the private dashboard to the collector's final HTTPS origin.
 
 The installed dashboard includes a **Public Pulse** view. Every property starts disabled. Enable only the properties and aggregate metrics the user deliberately chooses to publish. Pulse snapshots must never contain raw visitor, session, path, referrer, campaign, event, error, or repository data.
 

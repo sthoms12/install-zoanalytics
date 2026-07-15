@@ -8,6 +8,7 @@ export type SetupData = {
   properties: Array<{ id: string; name: string; status: string; projectPath: string | null }>;
   inventory: Array<{ sourceKey: string; name: string; classification: string; canonicalUrl: string | null; conflict: string | null; nextAction: string }>;
   nextActions: Array<{ propertyId: string; name: string; status: string; projectPath: string | null; action: string }>;
+  migration: { supported: string[]; runs: Array<{ id: string; source: string; propertyName: string; rowsImported: number }>; optional: boolean };
 };
 
 export type ActionData = {
@@ -170,7 +171,7 @@ export function SetupGuide({ setup, onRefresh, onAudit }: { setup: SetupData; on
   const pending = setup.nextActions.filter((item) => item.status !== "tracked");
   return <section className="mb-6 overflow-hidden rounded-xl border border-[#58e0c0]/20 bg-[#0d1718]">
     <div className="grid gap-6 p-5 lg:grid-cols-[.75fr_1.25fr] lg:p-6">
-      <div><p className="text-[10px] font-semibold uppercase tracking-[.16em] text-[#58e0c0]">Getting started · {setup.completedSteps}/{setup.steps.length}</p><h2 className="mt-3 text-2xl font-semibold tracking-[-.04em]">Finish your analytics baseline</h2><p className="mt-3 max-w-md text-sm leading-6 text-[#82928d]">ZoAnalytics needs a public inventory, verified tracker coverage, one crawl, and meaningful outcomes. Verification never records a fake visit.</p><p className="mt-4 text-[10px] text-[#5f706b]">Version {setup.appVersion}</p></div>
+      <div><p className="text-[10px] font-semibold uppercase tracking-[.16em] text-[#58e0c0]">Getting started · {setup.completedSteps}/{setup.steps.length}</p><h2 className="mt-3 text-2xl font-semibold tracking-[-.04em]">Finish your analytics baseline</h2><p className="mt-3 max-w-md text-sm leading-6 text-[#82928d]">Start fresh or bring history from Umami or Plausible. Migration is optional; discovery, verification, and audits never create fake visits.</p><div className="mt-4 rounded-lg border border-white/[.07] bg-white/[.025] p-3"><p className="text-xs font-medium text-[#c7d3cf]">Already have analytics history?</p><p className="mt-1 text-[10px] leading-4 text-[#71807c]">Run <code className="text-[#8ee7cf]">bun run migrate -- --help</code>. Every import starts as a dry run and preserves its source.</p></div><p className="mt-4 text-[10px] text-[#5f706b]">Version {setup.appVersion}</p></div>
       <div className="space-y-1">{setup.steps.map((step) => <div key={step.id} className="grid grid-cols-[28px_1fr_auto] items-center gap-3 rounded-lg px-3 py-3 hover:bg-white/[.035]"><span className={`grid size-7 place-items-center rounded-md ${step.complete ? "bg-[#58e0c0] text-[#07110e]" : "border border-white/10 text-[#65736f]"}`}>{step.complete ? <IconCheck size={15}/> : <span className="size-1.5 rounded-full bg-current"/>}</span><div><p className="text-sm font-medium">{step.label}</p><p className="mt-1 text-[10px] text-[#65736f]">{step.detail}</p></div>{!step.complete && step.id !== "goals" && <button disabled={Boolean(busy)} onClick={() => void run(step.id)} className="za-secondary-button">{busy === step.id ? "Working" : step.id === "verify" ? "Verify all" : step.id === "audit" ? "Run audit" : "Discover"}</button>}</div>)}</div>
     </div>
     {pending.length > 0 && <div className="border-t border-white/[.07] px-5 py-4 lg:px-6">

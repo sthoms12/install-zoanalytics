@@ -2,6 +2,7 @@ import { db, getProperties, getProperty, APP_VERSION } from "./db";
 import { FIXABLE_CODES } from "./fixes";
 import { listSurfaceInventory } from "./surfaces";
 import { scheduleCampaignOutcome } from "./campaign-outcomes";
+import { listMigrationRuns } from "./migration-import";
 
 type FunnelStep = { type: "page" | "event"; value: string };
 
@@ -54,6 +55,7 @@ export function getSetupStatus() {
       action: property.status === "tracked" ? "Tracker verified; no action required." : property.projectPath ? "Preview and apply the tracker to the linked Zo Site." : "Copy the tracker snippet into this public surface, then verify it.",
     })),
     latestDiscovery: latestDiscovery.at,
+    migration: { supported: ["umami", "plausible"], runs: listMigrationRuns(), optional: true },
   };
 }
 

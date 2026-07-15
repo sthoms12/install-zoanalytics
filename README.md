@@ -47,6 +47,8 @@ Publish it as a Zo Site with `ZOANALYTICS_COLLECTOR_ONLY=true` for the public co
 
 Every install starts with zero properties and an empty database — nothing is copied from the source instance. Full guardrails, discovery, update, and verification steps live in [`SKILL.md`](./SKILL.md).
 
+On first run, owners can start fresh or optionally migrate an Umami/Plausible CSV. Migration is dry-run-first, additive, source-attributed, fingerprinted, and duplicate-protected. Aggregate reports remain aggregate instead of being expanded into synthetic visitor activity.
+
 ## Updating
 
 ```bash

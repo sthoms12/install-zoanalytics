@@ -18,6 +18,7 @@ import { listSurfaceInventory, persistSurfaceInventory } from "./backend-lib/sur
 import { applyTrackerInstall, previewTrackerInstall } from "./backend-lib/tracker-install";
 import { listCampaignOutcomes, recordCampaignVerification, reopenCampaignOutcome } from "./backend-lib/campaign-outcomes";
 import { createWeeklyOwnerBrief } from "./backend-lib/weekly-brief";
+import { listMigrationRuns } from "./backend-lib/migration-import";
 
 type Mode = "development" | "production";
 const app = new Hono();
@@ -73,6 +74,7 @@ const collectorOrigin = process.env.ZOANALYTICS_PUBLIC_ORIGIN
   ?? (config.publish?.label && ownerHandle ? `https://${config.publish.label}-${ownerHandle}.zocomputer.io` : "");
 app.get("/api/analytics/intelligence", (c) => c.json({ ...getIntelligence(), collectorOrigin, externalSources: getExternalSources(), surfaceInventory: listSurfaceInventory() }));
 app.get("/api/analytics/setup", (c) => c.json(getSetupStatus()));
+app.get("/api/analytics/migrations", (c) => c.json({ runs: listMigrationRuns(), supported: ["umami", "plausible"] }));
 app.get("/api/analytics/surfaces", (c) => c.json({ surfaces: listSurfaceInventory() }));
 app.get("/api/analytics/pulse/config", (c) => c.json({ properties: listPulseConfig(), publicUrl: collectorOrigin ? `${collectorOrigin}/pulse` : "" }));
 app.patch("/api/analytics/pulse/config/:propertyId", async (c) => {

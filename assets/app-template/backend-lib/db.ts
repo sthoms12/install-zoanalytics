@@ -55,7 +55,7 @@ export type CollectPayload = {
   campaign?: { source?: string; medium?: string; campaign?: string; content?: string; term?: string };
 };
 
-export const APP_VERSION = "0.13.0";
+export const APP_VERSION = "0.14.0";
 
 export type CrawlPageInput = {
   propertyId: string;
@@ -342,6 +342,35 @@ function migrate() {
       applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS import_runs (
+      id TEXT PRIMARY KEY,
+      source TEXT NOT NULL,
+      source_fingerprint TEXT NOT NULL UNIQUE,
+      property_id TEXT NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
+      file_name TEXT NOT NULL,
+      mode TEXT NOT NULL,
+      rows_read INTEGER NOT NULL DEFAULT 0,
+      rows_imported INTEGER NOT NULL DEFAULT 0,
+      rows_skipped INTEGER NOT NULL DEFAULT 0,
+      period_start TEXT,
+      period_end TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS imported_daily_metrics (
+      property_id TEXT NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
+      source TEXT NOT NULL,
+      source_fingerprint TEXT NOT NULL,
+      day TEXT NOT NULL,
+      path TEXT NOT NULL DEFAULT '/',
+      pageviews INTEGER NOT NULL DEFAULT 0,
+      visitors INTEGER,
+      visits INTEGER,
+      bounce_rate REAL,
+      visit_duration_seconds REAL,
+      PRIMARY KEY (property_id, source, source_fingerprint, day, path)
+    );
+
     CREATE TABLE IF NOT EXISTS action_states (
       action_key TEXT PRIMARY KEY,
       status TEXT NOT NULL DEFAULT 'open',
@@ -552,6 +581,7 @@ function migrate() {
   db.prepare("INSERT OR IGNORE INTO schema_migrations (version) VALUES (5)").run();
   db.prepare("INSERT OR IGNORE INTO schema_migrations (version) VALUES (6)").run();
   db.prepare("INSERT OR IGNORE INTO schema_migrations (version) VALUES (7)").run();
+  db.prepare("INSERT OR IGNORE INTO schema_migrations (version) VALUES (8)").run();
   db.prepare("INSERT INTO app_settings (key, value) VALUES ('app_version', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP").run(APP_VERSION);
 }
 

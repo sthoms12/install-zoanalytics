@@ -44,6 +44,17 @@ When Cloudflare and GitHub are connected, `bun run external-discovery` imports e
 
 ## Commands
 
+### Guided migration
+
+Start fresh, or preview an Umami/Plausible CSV before importing it:
+
+```bash
+bun run migrate -- --source umami --property PROPERTY_ID --file /absolute/path/export.csv
+bun run migrate -- --source plausible --property PROPERTY_ID --file /absolute/path/export.csv
+```
+
+Add `--commit` only after reviewing the dry run. Imports are additive, source-attributed, fingerprinted, and duplicate-protected. Umami raw events can become historical pageviews/events. Plausible aggregate rows remain aggregate and never become synthetic sessions.
+
 ```bash
 bun run build
 bun run dev
