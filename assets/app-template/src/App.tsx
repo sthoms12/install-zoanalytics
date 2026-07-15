@@ -278,7 +278,9 @@ function DashboardApp() {
             </div>
             <nav className="za-scrollbar-none hidden min-w-0 flex-1 items-center justify-center gap-1 overflow-x-auto lg:flex" aria-label="Primary dashboard sections">
               {primaryAreas.map(({ id, label, icon: Icon, defaultView }) => <NavButton key={id} active={property === "all" && areaForView[view] === id} onClick={() => navigate(defaultView)} icon={Icon} label={label} />)}
-              <PublishDataMenu view={view} navigate={navigate} />
+              <span className="mx-1 h-5 w-px shrink-0 bg-white/[.08]" aria-hidden="true" />
+              <NavButton active={property === "all" && view === "pulse"} onClick={() => navigate("pulse")} icon={IconEye} label="Public Pulse" />
+              <NavButton active={property === "all" && view === "intelligence"} onClick={() => navigate("intelligence")} icon={IconSparkles} label="Data ops" />
             </nav>
             <div className="flex items-center gap-2">
               <button onClick={() => void load()} disabled={loading} className="za-icon-button" aria-label="Refresh dashboard"><IconRefresh size={17} className={loading ? "animate-spin" : ""} /></button>
@@ -287,7 +289,8 @@ function DashboardApp() {
           </div>
           <nav className="za-scrollbar-none -mx-1 flex gap-1 overflow-x-auto pb-2 lg:hidden" aria-label="Primary dashboard sections">
             {primaryAreas.map(({ id, label, icon: Icon, defaultView }) => <NavButton key={id} active={property === "all" && areaForView[view] === id} onClick={() => navigate(defaultView)} icon={Icon} label={label} />)}
-            <PublishDataMenu view={view} navigate={navigate} />
+            <NavButton active={property === "all" && view === "pulse"} onClick={() => navigate("pulse")} icon={IconEye} label="Public Pulse" />
+            <NavButton active={property === "all" && view === "intelligence"} onClick={() => navigate("intelligence")} icon={IconSparkles} label="Data ops" />
           </nav>
         </header>
 
@@ -577,16 +580,6 @@ function Health({ score }: { score: number }) { const tone = score >= 90 ? "text
 function ScoreRing({ score }: { score: number }) { return <div className="relative grid size-40 place-items-center rounded-full" style={{ background: `conic-gradient(#58e0c0 ${score * 3.6}deg, rgba(255,255,255,.06) 0)` }}><div className="grid size-[138px] place-items-center rounded-full bg-[#0d1315]"><div className="text-center"><p className="text-5xl font-semibold tracking-[-.06em] tabular-nums">{score || 0}</p><p className="mt-1 text-[10px] uppercase tracking-[.15em] text-[#65736f]">SEO health</p></div></div></div>; }
 function NavButton({ active, onClick, icon: Icon, label }: { active: boolean; onClick: () => void; icon: typeof IconRadar; label: string }) { return <button onClick={onClick} className={`flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-xs font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#58e0c0]/50 ${active ? "bg-white/[.08] text-white" : "text-[#71807c] hover:bg-white/[.04] hover:text-[#c9d3d0]"}`}><Icon size={15}/>{label}</button>; }
 
-function PublishDataMenu({ view, navigate }: { view: View; navigate: (view: View) => void }) {
-  const active = areaForView[view] === "publish";
-  return <details className="group relative shrink-0">
-    <summary className={`flex cursor-pointer list-none items-center gap-2 rounded-md px-3 py-2 text-xs font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#58e0c0]/50 [&::-webkit-details-marker]:hidden ${active ? "bg-white/[.08] text-white" : "text-[#71807c] hover:bg-white/[.04] hover:text-[#c9d3d0]"}`}><IconSparkles size={15}/>Publish & data<IconChevronRight size={12} className="rotate-90 transition group-open:-rotate-90"/></summary>
-    <div className="fixed right-3 top-[7.25rem] z-40 mt-2 w-52 overflow-hidden rounded-lg border border-white/[.1] bg-[#11191b] p-1.5 shadow-[0_18px_50px_rgba(0,8,8,.45)] lg:absolute lg:right-0 lg:top-auto">
-      <button onClick={(event) => { navigate("pulse"); event.currentTarget.closest("details")?.removeAttribute("open"); }} className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-xs transition ${view === "pulse" ? "bg-[#58e0c0]/10 text-[#70d9b9]" : "text-[#a9b6b2] hover:bg-white/[.05]"}`}><IconEye size={15}/><span><strong className="block font-semibold">Public Pulse</strong><span className="mt-0.5 block text-[10px] text-[#61706c]">Publish selected proof</span></span></button>
-      <button onClick={(event) => { navigate("intelligence"); event.currentTarget.closest("details")?.removeAttribute("open"); }} className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-xs transition ${view === "intelligence" ? "bg-[#58e0c0]/10 text-[#70d9b9]" : "text-[#a9b6b2] hover:bg-white/[.05]"}`}><IconSparkles size={15}/><span><strong className="block font-semibold">Data operations</strong><span className="mt-0.5 block text-[10px] text-[#61706c]">Sources, discovery, exports</span></span></button>
-    </div>
-  </details>;
-}
 function Empty({ icon: Icon, title, text }: { icon: typeof IconRadar; title: string; text: string }) { return <div className="grid min-h-40 place-items-center rounded-lg border border-dashed border-white/10 p-5 text-center"><div><Icon className="mx-auto text-[#54625f]" size={22}/><p className="mt-3 text-sm font-medium text-[#bdc8c5]">{title}</p><p className="mx-auto mt-1 max-w-xs text-xs leading-5 text-[#65736f]">{text}</p></div></div>; }
 function LoadingState({ error, retry }: { error: string; retry: () => void }) { return <main className="grid min-h-screen place-items-center bg-[#090d0f] text-[#e7efed]"><div className="text-center">{error ? <><IconAlertTriangle className="mx-auto text-[#ff8178]"/><p className="mt-3 text-sm">{error}</p><button onClick={retry} className="za-primary-button mx-auto mt-4">Retry</button></> : <><div className="mx-auto size-8 animate-spin rounded-full border-2 border-white/10 border-t-[#58e0c0]"/><p className="mt-4 text-xs uppercase tracking-[.15em] text-[#65736f]">Reading signals</p></>}</div></main>; }
 function propertyName(properties: Property[], id: string) { return properties.find((item) => item.id === id)?.name ?? id; }
