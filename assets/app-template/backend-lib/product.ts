@@ -8,6 +8,7 @@ export type AtomicAction = {
   key: string; propertyId: string; pageUrl: string; category: string; severity: string; title: string;
   why: string; evidence: string; fix: string; impact: number; confidence: number; effort: number;
   fixCode: string | null; priority: number; state: string; snoozedUntil: string | null; note: string | null;
+  freshness: string; verificationMethod: string; expectedImpact: string;
 };
 
 function stableKey(parts: Array<string | number | null | undefined>) {
@@ -78,15 +79,32 @@ function actionState(actionKey: string) {
 
 export function getActionCenter(): AtomicAction[] {
   const actions: Array<Record<string, unknown>> = [];
-  for (const property of getProperties().filter((item) => item.url.startsWith("http"))) {
+  const activePropertyIds = new Set((db.query("SELECT id FROM properties WHERE lifecycle='active'").all() as Array<{ id: string }>).map((item) => item.id));
+  for (const property of getProperties().filter((item) => activePropertyIds.has(item.id) && item.url.startsWith("http"))) {
     if (property.status !== "tracked") actions.push({
       key: stableKey(["tracker", property.id]), propertyId: property.id, pageUrl: property.url, category: "tracking", severity: "critical",
       title: `Verify analytics on ${property.name}`, why: "Unverified tracking creates blind spots in every traffic and conversion report.",
       evidence: `Current tracker state: ${property.status.replaceAll("-", " ")}.`, fix: "Install the generated snippet, then run tracker verification.", impact: 5, confidence: 5, effort: 1,
+      freshness: property.verifiedAt ? `Last verified ${property.verifiedAt}` : "Never verified", verificationMethod: "Fetch the public HTML and confirm the tracker origin and property ID without recording a visit.", expectedImpact: "Restores trustworthy traffic and conversion coverage.",
     });
   }
-  const findings = db.query(`SELECT property_id AS propertyId, page_url AS pageUrl, severity, code, message, MAX(created_at) AS createdAt
-    FROM seo_findings GROUP BY property_id, page_url, code ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END, createdAt DESC LIMIT 80`).all() as Array<Record<string, string>>;
+  const crawlHealth = db.query(`SELECT p.id AS propertyId, p.name, p.url, MAX(c.started_at) AS lastCrawlAt,
+      MAX(CASE WHEN c.status='completed' THEN c.started_at END) AS lastCompletedAt,
+      (SELECT status FROM crawl_runs latest WHERE latest.property_id=p.id ORDER BY latest.started_at DESC LIMIT 1) AS latestStatus
+    FROM properties p LEFT JOIN crawl_runs c ON c.property_id=p.id
+    WHERE p.lifecycle='active' AND p.url LIKE 'http%' GROUP BY p.id`).all() as Array<Record<string, string | null>>;
+  for (const item of crawlHealth) {
+    const ageDays = item.lastCompletedAt ? (Date.now() - new Date(`${item.lastCompletedAt}Z`).getTime()) / 86400000 : Infinity;
+    if (item.latestStatus !== "completed" || ageDays > 8) actions.push({
+      key: stableKey(["crawl", item.propertyId]), propertyId: item.propertyId, pageUrl: item.url, category: "data health", severity: item.latestStatus === "failed" ? "critical" : "warning",
+      title: item.latestStatus === "failed" ? `Repair failed audit for ${item.name}` : `Refresh stale audit for ${item.name}`,
+      why: "Stale audit evidence can hide broken pages, metadata regressions, and internal-link problems.", evidence: item.lastCompletedAt ? `Last completed crawl: ${item.lastCompletedAt}; latest status: ${item.latestStatus ?? "unknown"}.` : "No completed crawl is recorded.",
+      fix: "Run a fresh property crawl and investigate any request or parsing failure.", impact: 4, confidence: 5, effort: 1, freshness: item.lastCrawlAt ? `Last attempt ${item.lastCrawlAt}` : "No crawl observed", verificationMethod: "Run the crawler and require a completed crawl receipt with current page evidence.", expectedImpact: "Restores current technical and content diagnostics.",
+    });
+  }
+  const findings = db.query(`SELECT f.property_id AS propertyId, f.page_url AS pageUrl, f.severity, f.code, f.message, MAX(f.created_at) AS createdAt
+    FROM seo_findings f JOIN properties p ON p.id=f.property_id WHERE p.lifecycle='active'
+    GROUP BY f.property_id, f.page_url, f.code ORDER BY CASE f.severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END, createdAt DESC LIMIT 80`).all() as Array<Record<string, string>>;
   const fixes: Record<string, string> = {
     missing_title: "Add a concise, unique title that describes the page.", missing_description: "Add a specific meta description that explains the page value.",
     missing_h1: "Add one descriptive H1 to the main page content.", missing_canonical: "Add a self-referencing canonical URL.", noindex: "Remove noindex if this page should appear in search.",
@@ -99,6 +117,7 @@ export function getActionCenter(): AtomicAction[] {
     evidence: `${item.code.replaceAll("_", " ")} detected during the latest crawl.`, fix: fixes[item.code] ?? "Review the affected page and rerun the audit after correcting it.",
     impact: item.severity === "critical" ? 5 : item.severity === "warning" ? 3 : 2, confidence: 5, effort: ["missing_title", "missing_description", "missing_h1", "missing_canonical", "missing_alt"].includes(item.code) ? 1 : 3,
     fixCode: (FIXABLE_CODES as readonly string[]).includes(item.code) ? item.code : null,
+    freshness: `Observed ${item.createdAt}`, verificationMethod: "Rerun the property audit and confirm the finding no longer appears.", expectedImpact: item.severity === "critical" ? "Restores reliable discovery or page access." : "Improves accessibility, search presentation, or page clarity.",
   });
   const errors = db.query(`SELECT property_id AS propertyId, path, message, COUNT(*) AS occurrences FROM client_errors
     WHERE created_at >= datetime('now','-7 days') GROUP BY property_id, path, message HAVING COUNT(*) >= 3 ORDER BY occurrences DESC LIMIT 20`).all() as Array<Record<string, string | number>>;
@@ -106,11 +125,36 @@ export function getActionCenter(): AtomicAction[] {
     key: stableKey(["error", String(item.propertyId), String(item.path), String(item.message)]), propertyId: item.propertyId, pageUrl: item.path, category: "reliability", severity: "warning",
     title: "Repeated browser error", why: "Repeated client errors can block an action even when the page still loads.", evidence: `${item.occurrences} occurrences in the last 7 days: ${item.message}`,
     fix: "Reproduce the affected path, inspect the browser error, deploy the correction, then verify this action.", impact: 4, confidence: 4, effort: 3,
+    freshness: "Observed within the last 7 days", verificationMethod: "Revisit the path and confirm no matching client error is recorded after deployment.", expectedImpact: "Reduces failed or interrupted visitor actions.",
+  });
+  const vitals = db.query(`SELECT property_id AS propertyId, path, metric, COUNT(*) AS samples,
+      SUM(CASE WHEN rating='poor' THEN 1 ELSE 0 END) AS poorSamples, MAX(created_at) AS observedAt
+    FROM performance_metrics WHERE created_at>=datetime('now','-30 days') AND metric IN ('LCP','INP','CLS')
+    GROUP BY property_id,path,metric HAVING samples>=5 AND poorSamples*1.0/samples>=0.25`).all() as Array<Record<string, string | number>>;
+  for (const item of vitals) actions.push({
+    key: stableKey(["performance", item.propertyId, item.path, item.metric]), propertyId: item.propertyId, pageUrl: item.path, category: "performance", severity: "warning",
+    title: `Improve poor ${item.metric} on ${item.path}`, why: "A sustained poor Core Web Vital can make the page slower or less stable for real visitors.", evidence: `${item.poorSamples} of ${item.samples} observations were rated poor in the last 30 days.`,
+    fix: "Inspect the affected page and its field metric, deploy a targeted performance change, then collect at least five new observations.", impact: 4, confidence: 4, effort: 3, freshness: `Observed through ${item.observedAt}`, verificationMethod: "Require at least five post-change field observations and a non-poor p75 rating.", expectedImpact: "Improves the real visitor loading, responsiveness, or visual-stability experience.",
+  });
+  const engagement = db.query(`WITH daily AS (
+      SELECT property_id, path, date(created_at) AS day, COUNT(*) AS views,
+        AVG(CASE WHEN COALESCE(duration_ms,0)>=10000 THEN 1.0 ELSE 0.0 END) AS rate
+      FROM pageviews WHERE created_at>=datetime('now','-28 days') GROUP BY property_id,path,day), windows AS (
+      SELECT property_id AS propertyId,path,
+        SUM(CASE WHEN day>=date('now','-14 days') THEN views ELSE 0 END) AS recentViews,
+        SUM(CASE WHEN day<date('now','-14 days') THEN views ELSE 0 END) AS priorViews,
+        AVG(CASE WHEN day>=date('now','-14 days') THEN rate END) AS recentRate,
+        AVG(CASE WHEN day<date('now','-14 days') THEN rate END) AS priorRate FROM daily GROUP BY property_id,path)
+      SELECT * FROM windows WHERE recentViews>=20 AND priorViews>=20 AND priorRate-recentRate>=0.15`).all() as Array<Record<string, string | number>>;
+  for (const item of engagement) actions.push({
+    key: stableKey(["engagement", item.propertyId, item.path]), propertyId: item.propertyId, pageUrl: item.path, category: "engagement", severity: "warning",
+    title: `Investigate declining engagement on ${item.path}`, why: "A meaningful decline on an important page can signal a content, intent, or experience regression.", evidence: `Engagement fell from ${Math.round(Number(item.priorRate) * 100)}% to ${Math.round(Number(item.recentRate) * 100)}% across ${item.priorViews} prior and ${item.recentViews} recent views.`,
+    fix: "Review recent page changes, acquisition mix, content clarity, and performance before choosing a targeted correction.", impact: 4, confidence: 3, effort: 3, freshness: "Compared the latest 14 days with the preceding 14 days", verificationMethod: "Collect at least 20 post-change views and compare engagement with the recorded baseline.", expectedImpact: "Recovers meaningful interaction on a page with demonstrated traffic.",
   });
   return actions.map((item) => {
     const key = String(item.key); const state = actionState(key);
     const priority = Number(item.impact) * Number(item.confidence) * 4 - Number(item.effort) * 3;
-    return { ...item, fixCode: item.fixCode ? String(item.fixCode) : null, priority, state: state?.status ?? "open", snoozedUntil: state?.snoozedUntil ?? null, note: state?.note ?? null } as AtomicAction;
+    return { ...item, freshness: String(item.freshness ?? "Current observation"), verificationMethod: String(item.verificationMethod ?? "Rerun the originating check."), expectedImpact: String(item.expectedImpact ?? item.why), fixCode: item.fixCode ? String(item.fixCode) : null, priority, state: state?.status ?? "open", snoozedUntil: state?.snoozedUntil ?? null, note: state?.note ?? null } as AtomicAction;
   }).filter((item) => item.state === "open" && (!item.snoozedUntil || new Date(item.snoozedUntil) <= new Date())).sort((a, b) => b.priority - a.priority);
 }
 
@@ -130,6 +174,10 @@ export type ActionCampaign = {
   fixCode: string | null;
   childKeys: string[];
   actions: AtomicAction[];
+  freshness: string;
+  verificationMethod: string;
+  expectedImpact: string;
+  confidence: number;
 };
 
 const severityRank: Record<string, number> = { critical: 3, warning: 2, info: 1 };
@@ -179,6 +227,10 @@ export function getActionCampaigns(): ActionCampaign[] {
       fixCode: fixability === "fixable" ? String(representative.fixCode) : null,
       childKeys: actions.map((action) => String(action.key)),
       actions,
+      freshness: representative.freshness,
+      verificationMethod: representative.verificationMethod,
+      expectedImpact: representative.expectedImpact,
+      confidence: Math.min(...actions.map((action) => action.confidence)),
     };
   }).sort((a, b) => b.priority - a.priority || b.affectedPages - a.affectedPages);
 }

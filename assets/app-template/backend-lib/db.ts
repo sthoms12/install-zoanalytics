@@ -55,7 +55,7 @@ export type CollectPayload = {
   campaign?: { source?: string; medium?: string; campaign?: string; content?: string; term?: string };
 };
 
-export const APP_VERSION = "0.9.0";
+export const APP_VERSION = "0.10.0";
 
 export type CrawlPageInput = {
   propertyId: string;

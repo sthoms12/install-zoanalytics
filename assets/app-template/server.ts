@@ -94,7 +94,7 @@ app.post("/api/analytics/action-campaigns/:key/verify", async (c) => {
     const results = await Promise.all([...new Set(campaign.actions.map((item) => item.propertyId))].map((propertyId) => verifyTracker(propertyId, collectorOrigin)));
     return c.json({ verified: results.every((item) => item.ok), results, campaign: getActionCampaigns().find((item) => item.key === campaign.key) ?? null });
   }
-  if (campaign.category === "site audit") {
+  if (campaign.category === "site audit" || campaign.category === "data health") {
     await crawlProperty(campaign.propertyId, 20);
     return c.json({ verified: !getActionCampaigns().some((item) => item.key === campaign.key), campaign: getActionCampaigns().find((item) => item.key === campaign.key) ?? null });
   }
