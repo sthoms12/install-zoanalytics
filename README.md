@@ -1,0 +1,54 @@
+# ZoAnalytics
+
+Private, first-party analytics and SEO intelligence for anything you host on your own [Zo Computer](https://zo.computer) — Zo Space routes, published Zo Sites, public HTTP services, or external Cloudflare/GitHub sites. No third-party trackers, no shared database, no vendor lock-in. Your data stays on your Zo.
+
+**Live example:** [zoanalytics-thomstech.zocomputer.io/pulse](https://zoanalytics-thomstech.zocomputer.io/pulse) — the public, opt-in snapshot view of a real running instance. It shows only aggregated metrics an owner chooses to publish (pageviews, visitors, trend, audit score); the private dashboard behind it stays authenticated and off-limits.
+
+## What you get
+
+- A private dashboard (yours alone, sign-in required) with traffic, SEO audits, Core Web Vitals, and an action center for fixes
+- A lightweight first-party tracker (`zowa.js`) you drop into any site you own
+- An optional public **Pulse** page for showing off aggregate stats without exposing the dashboard
+- Automatic weekly crawl, Common Crawl sync, Ahrefs sync (if connected), and intelligence refresh — no external cron needed
+- Discovery that only ever includes surfaces Zo confirms are public; private routes and services are never touched
+
+## Install (on your own Zo)
+
+This repo is packaged as a Zo Skill. On your own Zo Computer:
+
+```bash
+git clone https://github.com/sthoms12/install-zoanalytics.git Skills/install-zoanalytics
+```
+
+Then just tell your Zo assistant something like *"install ZoAnalytics"* — it will read `SKILL.md` and walk through installing a clean instance into `/home/workspace/zoanalytics`, choosing a port, and publishing the public collector.
+
+### Manual install
+
+If you'd rather run it yourself from the Zo terminal:
+
+```bash
+cd Skills/install-zoanalytics
+bun run scripts/install.ts \
+  --target /home/workspace/zoanalytics \
+  --port 57681 \
+  --label zoanalytics \
+  --owner-handle YOUR_ZO_HANDLE
+```
+
+Then, inside the installed app:
+
+```bash
+bun run build
+```
+
+Publish it as a Zo Site with `ZOANALYTICS_COLLECTOR_ONLY=true` for the public collector + Pulse surfaces, and keep the dashboard itself in a private Zo Site preview (or a separate authenticated deployment if you want one).
+
+Every install starts with zero properties and an empty database — nothing is copied from the source instance. Full guardrails, discovery, update, and verification steps live in [`SKILL.md`](./SKILL.md).
+
+## Updating
+
+```bash
+bun run scripts/update.ts --target /home/workspace/zoanalytics
+```
+
+Backs up first, replaces application source, preserves your `data/`, `.env`, and `zosite.json`.
