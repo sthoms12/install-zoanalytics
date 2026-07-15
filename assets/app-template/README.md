@@ -30,6 +30,8 @@ No paid analytics or SEO API is required.
 - Five primary areas—Overview, Audience, Visibility, Improve, and Outcomes—organize every report into nested workflow tabs; Public Pulse and data operations remain available from the secondary menu.
 - The portfolio shell loads first and only the active workflow requests its supporting APIs; superseded requests are cancelled and production bundles are split by runtime, charts, icons, and vendor code.
 - Workspace Site discovery confirms the derived public URL is anonymously reachable before activation and retires stale workspace-site rows when a public deployment no longer exists; private `*.zo.computer` dashboards never become tracker gaps.
+- Zo Space, Site, service, and external observations reconcile into public reachable, private, development-only, published-unreachable, redirected/aliased, or retired states. Site/service records sharing a project are deduplicated, unrelated conflicts are surfaced, and only public reachable surfaces become analytics properties.
+- Guided tracker onboarding gives every public property a next action and can preview then explicitly apply a safe `index.html` tracker edit. Republish and public verification remain separate, so a local edit never appears as a successful deployment.
 
 ## Public-only discovery
 

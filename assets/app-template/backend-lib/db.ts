@@ -55,7 +55,7 @@ export type CollectPayload = {
   campaign?: { source?: string; medium?: string; campaign?: string; content?: string; term?: string };
 };
 
-export const APP_VERSION = "0.7.0";
+export const APP_VERSION = "0.8.0";
 
 export type CrawlPageInput = {
   propertyId: string;
@@ -387,6 +387,27 @@ function migrate() {
       last_synced_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (property_id, provider)
     );
+
+    CREATE TABLE IF NOT EXISTS surface_inventory (
+      source_key TEXT PRIMARY KEY,
+      provider TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      url TEXT,
+      canonical_url TEXT,
+      project_path TEXT,
+      classification TEXT NOT NULL,
+      property_id TEXT REFERENCES properties(id) ON DELETE SET NULL,
+      conflict TEXT,
+      next_action TEXT NOT NULL,
+      metadata TEXT NOT NULL DEFAULT '{}',
+      first_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      retired_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_surface_inventory_classification ON surface_inventory(classification);
 
     CREATE TABLE IF NOT EXISTS pulse_config (
       property_id TEXT PRIMARY KEY REFERENCES properties(id) ON DELETE CASCADE,

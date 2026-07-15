@@ -1,6 +1,7 @@
 import { Glob } from "bun";
 import { db, getProperties, upsertDiscoveredProperty, upsertPropertySource, upsertSurfaceAlias } from "./db";
 import { getActionCenter } from "./product";
+import { persistSurfaceInventory, type SurfaceObservation } from "./surfaces";
 
 const WORKSPACE = "/home/workspace";
 
@@ -75,9 +76,7 @@ export async function importDiscoveryManifest(surfaces: DiscoverySurface[]) {
 }
 
 export async function discoverProperties() {
-  const existing = new Set(getProperties().map((item) => item.id));
-  const discovered: Array<{ id: string; name: string; url: string; projectPath: string; status: string }> = [];
-  const skipped: Array<{ projectPath: string; reason: string }> = [];
+  const observations: SurfaceObservation[] = [];
   const glob = new Glob("*/zosite.json");
   const configuredHandle = process.env.ZO_OWNER_HANDLE?.trim();
   const inferredHandle = getProperties().map((item) => item.url.match(/^[a-z]+:\/\/[^/]+-([a-z0-9-]+)\.zocomputer\.io/i)?.[1]).find(Boolean);
@@ -87,23 +86,38 @@ export async function discoverProperties() {
     const projectPath = `${WORKSPACE}/${relative.replace(/\/zosite\.json$/, "")}`;
     try {
       const config = await Bun.file(`${WORKSPACE}/${relative}`).json() as { name?: string; publish?: { label?: string; type?: string; public?: boolean; env?: Record<string, string> } };
-      if (!config.publish?.label || config.publish.type !== "http") { skipped.push({ projectPath, reason: "not-published-http" }); continue; }
-      if (config.publish.public === false || config.publish.env?.ZOANALYTICS_COLLECTOR_ONLY === "true" || config.publish.label === "zoanalytics") { skipped.push({ projectPath, reason: "private-or-collector" }); continue; }
-      const propertyId = slug(config.name || config.publish.label);
-      if (!ownerHandle) { skipped.push({ projectPath, reason: "owner-handle-required" }); continue; }
-      const url = `https://${config.publish.label}-${ownerHandle}.zocomputer.io`;
-      if (!await reachableWithoutAuth(new URL(url))) {
-        skipped.push({ projectPath, reason: "not-publicly-reachable" });
-        db.prepare("UPDATE properties SET lifecycle='retired', retired_at=COALESCE(retired_at, CURRENT_TIMESTAMP), updated_at=CURRENT_TIMESTAMP WHERE id=? AND tags LIKE '%workspace-site%'").run(propertyId);
-        continue;
-      }
-      if (existing.has(propertyId)) { db.prepare("UPDATE properties SET last_discovered_at=CURRENT_TIMESTAMP, lifecycle='active', retired_at=NULL WHERE id=?").run(propertyId); continue; }
-      upsertDiscoveredProperty({ id: propertyId, name: config.name || config.publish.label, kind: "site", url, projectPath, source: "workspace-site" });
-      existing.add(propertyId);
-      discovered.push({ id: propertyId, name: config.name || config.publish.label, url, projectPath, status: "missing-tracker" });
-    } catch { skipped.push({ projectPath, reason: "invalid-config" }); }
+      const label = config.publish?.label;
+      const collector = config.publish?.env?.ZOANALYTICS_COLLECTOR_ONLY === "true" || label === "zoanalytics";
+      if (collector) continue;
+      const published = Boolean(label && config.publish?.type === "http");
+      const isPublic = config.publish?.public !== false;
+      const url = published && ownerHandle ? `https://${label}-${ownerHandle}.${isPublic ? "zocomputer.io" : "zo.computer"}` : null;
+      const reachable = url && isPublic ? await reachableWithoutAuth(new URL(url)) : null;
+      observations.push({
+        sourceKey: `zo-site:${relative.replace(/\/zosite\.json$/, "")}`,
+        provider: "zo-site",
+        sourceId: label || relative.replace(/\/zosite\.json$/, ""),
+        name: config.name || label || relative.split("/")[0],
+        kind: "site",
+        url,
+        projectPath,
+        public: isPublic,
+        published,
+        mode: config.publish?.type ?? null,
+        reachable,
+        metadata: { product: "zo-site", label: label ?? null },
+      });
+    } catch {
+      observations.push({ sourceKey: `zo-site:${relative}`, provider: "zo-site", sourceId: relative, name: relative.split("/")[0], kind: "site", projectPath, public: false, published: false, metadata: { invalidConfig: true } });
+    }
   }
-  return { discovered, skipped, total: getProperties().length };
+  const inventory = persistSurfaceInventory(observations, ["zo-site"]);
+  return {
+    discovered: inventory.filter((item) => item.provider === "zo-site" && (item.classification === "public-reachable" || item.classification === "redirected-alias")),
+    skipped: inventory.filter((item) => item.provider === "zo-site" && item.classification !== "public-reachable" && item.classification !== "redirected-alias"),
+    inventory,
+    total: getProperties().length,
+  };
 }
 
 export function getIntelligence() {

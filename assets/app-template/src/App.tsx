@@ -77,6 +77,7 @@ type Intelligence = {
   reports: Array<{ id: string; periodStart: string; periodEnd: string; createdAt: string }>;
   trackerCoverage: Array<{ propertyId: string; name: string; url: string; status: string; lastSignalAt: string | null; installed: number }>;
   externalSources: Array<{ propertyId: string; provider: string; sourceId: string; repository: string | null; repositoryUrl: string | null; metadata: Record<string, unknown>; lastSyncedAt: string }>;
+  surfaceInventory: Array<{ sourceKey: string; provider: string; name: string; kind: string; canonicalUrl: string | null; classification: string; propertyId: string | null; conflict: string | null; nextAction: string }>;
   collectorOrigin: string;
 };
 
@@ -483,12 +484,25 @@ function IntelligenceView({ data, intelligence, reload }: { data: Dashboard; int
       <Panel title="Backlink ledger" eyebrow="Observed first-party referrers" icon={IconLink}>{intelligence.backlinks.length ? <RankedRows rows={intelligence.backlinks.map((item) => ({ title: host(item.sourceUrl), label: propertyName(data.properties,item.propertyId), value: item.visits, suffix: item.status }))}/> : <Empty icon={IconLink} title="No backlinks yet" text="External referrers are promoted into a persistent backlink ledger."/>}</Panel>
     </section>
     <ExternalSites sources={intelligence.externalSources} busy={busy === "/api/analytics/discover/external"} message={operationMessage} onSync={() => void action("/api/analytics/discover/external")} reload={reload}/>
+    <SurfaceInventory surfaces={intelligence.surfaceInventory} />
     <section className="grid gap-4 xl:grid-cols-[1fr_1fr]">
       <Panel title="Tracker coverage" eyebrow="Inventory, install status and snippets" icon={IconCode}><div className="space-y-1">{intelligence.trackerCoverage.map((item) => <TrackerRow key={item.propertyId} item={item} origin={intelligence.collectorOrigin} source={intelligence.externalSources.find((source) => source.propertyId === item.propertyId)}/>)}</div></Panel>
       <Panel title="Operations" eyebrow="Discovery, rankings and reporting" icon={IconBolt}><div className="grid gap-3 sm:grid-cols-2"><Operation title="Discover Zo properties" text="Scan published Zo Site configurations and add missing public surfaces." button="Run discovery" busy={busy === "/api/analytics/discover"} onClick={() => void action("/api/analytics/discover")}/><Operation title="Observe rankings" text="Check watched keywords against a public search result surface." button="Check ranks" busy={busy === "/api/analytics/maintenance/ranks"} onClick={() => void action("/api/analytics/maintenance/ranks")}/><Operation title="Discover backlinks" text="Expand the backlink ledger beyond observed first-party referrers." button="Find links" busy={busy === "/api/analytics/maintenance/backlinks"} onClick={() => void action("/api/analytics/maintenance/backlinks")}/><Operation title="Weekly intelligence brief" text="Snapshot traffic, changes, backlinks, journeys and open alerts." button="Generate report" busy={busy === "/api/analytics/reports/weekly"} onClick={() => void action("/api/analytics/reports/weekly")}/></div><div className="mt-4 grid grid-cols-3 gap-px overflow-hidden rounded-lg bg-white/[.07]"><MiniNumber label="Reports" value={intelligence.reports.length}/><MiniNumber label="Competitors" value={intelligence.competitors.length}/><MiniNumber label="Goals" value={intelligence.goals.length}/></div></Panel>
     </section>
     {intelligence.alerts.length > 0 && <Panel title="Active alerts" eyebrow="Anomalies requiring review" icon={IconBell}><div className="space-y-1">{intelligence.alerts.map((item) => <div key={item.id} className="grid grid-cols-[8px_1fr] gap-3 rounded-lg px-2 py-3 hover:bg-white/[.03]"><span className={`mt-1.5 size-2 rounded-full ${item.severity === "critical" ? "bg-[#ff8178]" : "bg-[#efc86b]"}`}/><div><p className="text-sm font-medium">{item.title}</p><p className="mt-1 text-xs text-[#71807c]">{item.message}</p></div></div>)}</div></Panel>}
   </div>;
+}
+
+function SurfaceInventory({ surfaces }: { surfaces: Intelligence["surfaceInventory"] }) {
+  const tones: Record<string, string> = {
+    "public-reachable": "border-[#58e0c0]/25 text-[#70d9b9]",
+    "redirected-alias": "border-[#7aa2ff]/25 text-[#9bb7ff]",
+    private: "border-[#c992ff]/25 text-[#d8b3ff]",
+    "development-only": "border-white/10 text-[#8b9995]",
+    "published-unreachable": "border-[#efc86b]/25 text-[#efc86b]",
+    retired: "border-white/10 text-[#61706c]",
+  };
+  return <Panel title="Zo surface inventory" eyebrow="Public, private, preview and retired states" icon={IconRadar}><div className="divide-y divide-white/[.06]">{surfaces.map((surface) => <div key={surface.sourceKey} className="grid gap-3 py-3 sm:grid-cols-[1fr_auto] sm:items-center"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="truncate text-sm font-medium text-[#dce6e3]">{surface.name}</p><span className={`border px-2 py-0.5 text-[8px] font-semibold uppercase tracking-wider ${tones[surface.classification] ?? tones["development-only"]}`}>{surface.classification.replaceAll("-", " ")}</span><span className="text-[9px] uppercase tracking-wider text-[#52605d]">{surface.provider.replace("zo-", "")}</span></div><p className="mt-1 truncate text-[10px] text-[#61706c]">{surface.canonicalUrl ?? "No public URL"}</p><p className={`mt-1 text-[10px] leading-4 ${surface.conflict ? "text-[#ff9d96]" : "text-[#71807c]"}`}>{surface.conflict ?? surface.nextAction}</p></div>{surface.propertyId && <span className="text-[9px] font-semibold uppercase tracking-wider text-[#60706b]">{surface.propertyId}</span>}</div>)}</div></Panel>;
 }
 
 function ExternalSites({ sources, busy, message, onSync, reload }: { sources: Intelligence["externalSources"]; busy: boolean; message: string; onSync: () => void; reload: () => Promise<void> }) {

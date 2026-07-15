@@ -11,6 +11,7 @@
     "ahrefs-sync": "bun scripts/ahrefs-sync.ts",
     "common-crawl-sync": "bun scripts/common-crawl-sync.ts",
     "external-discovery": "bun scripts/external-discovery.ts",
+    "reconcile-inventory": "bun scripts/reconcile-inventory.ts",
     "pulse-refresh": "bun scripts/pulse-refresh.ts",
     "backup": "bun scripts/backup.ts",
     "doctor": "bun scripts/doctor.ts",

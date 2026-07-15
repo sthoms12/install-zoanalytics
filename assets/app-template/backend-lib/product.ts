@@ -1,5 +1,6 @@
 import { db, getProperties, getProperty, APP_VERSION } from "./db";
 import { FIXABLE_CODES } from "./fixes";
+import { listSurfaceInventory } from "./surfaces";
 
 type FunnelStep = { type: "page" | "event"; value: string };
 
@@ -29,6 +30,7 @@ export function getSetupStatus() {
   const crawled = db.query("SELECT COUNT(DISTINCT crawl_runs.property_id) AS count FROM crawl_runs JOIN properties ON properties.id=crawl_runs.property_id WHERE crawl_runs.status='completed' AND properties.lifecycle='active'").get() as { count: number };
   const goals = db.query("SELECT COUNT(*) AS count FROM goals WHERE active=1").get() as { count: number };
   const latestDiscovery = db.query("SELECT MAX(last_discovered_at) AS at FROM properties").get() as { at: string | null };
+  const inventory = listSurfaceInventory();
   const steps = [
     { id: "discover", label: "Discover public surfaces", complete: counts.total > 0, detail: `${counts.total} public ${counts.total === 1 ? "surface" : "surfaces"}` },
     { id: "verify", label: "Verify tracker coverage", complete: counts.total > 0 && counts.verified === counts.total, detail: `${counts.verified} of ${counts.total} verified` },
@@ -41,6 +43,14 @@ export function getSetupStatus() {
     completedSteps: steps.filter((step) => step.complete).length,
     steps,
     properties,
+    inventory,
+    nextActions: properties.map((property) => ({
+      propertyId: property.id,
+      name: property.name,
+      status: property.status,
+      projectPath: property.projectPath,
+      action: property.status === "tracked" ? "Tracker verified; no action required." : property.projectPath ? "Preview and apply the tracker to the linked Zo Site." : "Copy the tracker snippet into this public surface, then verify it.",
+    })),
     latestDiscovery: latestDiscovery.at,
   };
 }

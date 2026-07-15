@@ -2,7 +2,7 @@
 
 ZoAnalytics is private analytics for public Zo web surfaces.
 
-Version `0.7.0` adds an opt-in public Pulse view with sanitized aggregate snapshots alongside account-neutral Cloudflare production discovery, GitHub repository matching, guided setup, tracker verification, Action Center, page detail, goals, funnels, briefs, exports, Web Vitals, migrations, backup, and doctor workflows. It also adds a Change-to-Outcome Ledger that lines up commits, crawler-detected content edits, tracker installs, and applied fixes against before/after traffic and SEO outcomes; a Safe Fix Laboratory that previews, applies, and reverts title/description/canonical/noindex fixes on eligible properties; a self-contained weekly data-refresh timer with no AI or external cron involved; normalized freshness, verification, and sample states; and section-aware dashboard loading with request cancellation and split production bundles.
+Version `0.8.0` adds Zo-first surface reconciliation and guided tracker installation alongside the opt-in public Pulse view, account-neutral Cloudflare production discovery, GitHub repository matching, tracker verification, Action Center, page detail, goals, funnels, briefs, exports, Web Vitals, migrations, backup, and doctor workflows. It also includes the Change-to-Outcome Ledger, Safe Fix Laboratory, deterministic weekly refresh timer, normalized trust states, and section-aware dashboard loading.
 
 ## Invariants
 
@@ -46,5 +46,6 @@ Keep the five-area dashboard navigation and its nested tabs aligned with URL sta
 Dashboard data loading is section-aware: `/api/analytics/summary` provides the portfolio shell and supporting APIs load only for the active workflow. Preserve AbortController cancellation when period or section changes supersede an in-flight request. Production chunks are split in `vite.config.ts`.
 
 Workspace Site discovery must anonymously verify the derived `*.zocomputer.io` URL before creating or reactivating a property. A publish block in `zosite.json` does not prove the service is public or currently deployed; unreachable workspace-site rows are retired so private `*.zo.computer` dashboards never become tracker gaps.
+`backend-lib/surfaces.ts` owns the six-state Zo surface inventory, project-path deduplication, conflict reporting, and public-only activation rule. `backend-lib/tracker-install.ts` keeps preview, explicit source apply, republish, and public verification as separate stages.
 
 `getActionCenter()` remains the atomic action source. `getActionCampaigns()` groups open actions into work campaigns, and `setActionCampaignState()` updates every child in one SQLite transaction. Keep source verification distinct from manually marking a campaign resolved.

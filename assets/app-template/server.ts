@@ -14,6 +14,8 @@ import { getOverviewBrief } from "./backend-lib/overview";
 import { applyFix, getFixCapability, listFixes, previewFix, revertFix } from "./backend-lib/fixes";
 import { startWeeklyRefreshScheduler } from "./backend-lib/scheduler";
 import { getPropertyWorkspace } from "./backend-lib/workspace";
+import { listSurfaceInventory, persistSurfaceInventory } from "./backend-lib/surfaces";
+import { applyTrackerInstall, previewTrackerInstall } from "./backend-lib/tracker-install";
 
 type Mode = "development" | "production";
 const app = new Hono();
@@ -46,6 +48,7 @@ app.get("/pulse", (c) => new Response(pulsePageHtml(), {
     "X-Frame-Options": "DENY",
   },
 }));
+if (collectorOnly) app.get("/", (c) => c.redirect("/pulse", 302));
 app.use("/api/analytics/*", async (c, next) => {
   if (!collectorOnly) return next();
   if (c.req.path === "/api/analytics/collect") return next();
@@ -66,8 +69,9 @@ const inferredOwnerHandle = getProperties().map((item) => item.url.match(/^[a-z]
 const ownerHandle = process.env.ZO_OWNER_HANDLE?.trim() || inferredOwnerHandle;
 const collectorOrigin = process.env.ZOANALYTICS_PUBLIC_ORIGIN
   ?? (config.publish?.label && ownerHandle ? `https://${config.publish.label}-${ownerHandle}.zocomputer.io` : "");
-app.get("/api/analytics/intelligence", (c) => c.json({ ...getIntelligence(), collectorOrigin, externalSources: getExternalSources() }));
+app.get("/api/analytics/intelligence", (c) => c.json({ ...getIntelligence(), collectorOrigin, externalSources: getExternalSources(), surfaceInventory: listSurfaceInventory() }));
 app.get("/api/analytics/setup", (c) => c.json(getSetupStatus()));
+app.get("/api/analytics/surfaces", (c) => c.json({ surfaces: listSurfaceInventory() }));
 app.get("/api/analytics/pulse/config", (c) => c.json({ properties: listPulseConfig(), publicUrl: collectorOrigin ? `${collectorOrigin}/pulse` : "" }));
 app.patch("/api/analytics/pulse/config/:propertyId", async (c) => {
   const body = await c.req.json().catch(() => ({}));
@@ -140,6 +144,12 @@ app.get("/api/analytics/export/:dataset", (c) => {
   return new Response(rowsToCsv(rows), { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="zoanalytics-${dataset}.csv"` } });
 });
 app.post("/api/analytics/discover", async (c) => c.json(await discoverProperties()));
+app.post("/api/analytics/discover/inventory", async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  if (!Array.isArray(body.surfaces)) return c.json({ error: "surfaces must be an array" }, 400);
+  try { return c.json({ surfaces: persistSurfaceInventory(body.surfaces) }); }
+  catch (error) { return c.json({ error: error instanceof Error ? error.message : "Could not reconcile inventory" }, 400); }
+});
 app.post("/api/analytics/discover/external", async (c) => c.json(await discoverExternalProperties()));
 app.post("/api/analytics/properties/external", async (c) => {
   const body = await c.req.json().catch(() => ({}));
@@ -147,6 +157,14 @@ app.post("/api/analytics/properties/external", async (c) => {
   catch (error) { return c.json({ error: error instanceof Error ? error.message : "Could not add external site" }, 400); }
 });
 app.post("/api/analytics/verify/:propertyId", async (c) => c.json(await verifyTracker(c.req.param("propertyId"), collectorOrigin)));
+app.post("/api/analytics/tracker/:propertyId/preview", async (c) => {
+  try { return c.json(await previewTrackerInstall(c.req.param("propertyId"), collectorOrigin)); }
+  catch (error) { return c.json({ error: error instanceof Error ? error.message : "Could not preview tracker installation" }, 400); }
+});
+app.post("/api/analytics/tracker/:propertyId/apply", async (c) => {
+  try { return c.json(await applyTrackerInstall(c.req.param("propertyId"), collectorOrigin)); }
+  catch (error) { return c.json({ error: error instanceof Error ? error.message : "Could not apply tracker installation" }, 400); }
+});
 app.post("/api/analytics/goals", async (c) => {
   const body = await c.req.json().catch(() => ({}));
   if (typeof body.propertyId !== "string" || typeof body.name !== "string" || typeof body.eventName !== "string") return c.json({ error: "propertyId, name, and eventName are required" }, 400);
