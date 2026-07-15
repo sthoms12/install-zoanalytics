@@ -1,4 +1,5 @@
 import { db, getProperties, upsertDiscoveredProperty, upsertPropertySource, upsertSurfaceAlias } from "./db";
+import { normalizeZoReceipt, recordZoReceipt } from "./ledger";
 
 export type SurfaceClassification = "public-reachable" | "private" | "development-only" | "published-unreachable" | "redirected-alias" | "retired";
 
@@ -119,6 +120,8 @@ export function persistSurfaceInventory(observations: SurfaceObservation[], reti
       upsert.run(item.sourceKey, item.provider, item.sourceId, item.name, item.kind, item.url ?? null, item.canonicalUrl,
         item.projectPath ?? null, item.classification, item.propertyId, item.conflict, item.nextAction,
         JSON.stringify(item.metadata ?? {}), item.classification);
+      const receipt = normalizeZoReceipt({ provider: item.provider, sourceId: item.sourceId, propertyId: item.propertyId, url: item.canonicalUrl, metadata: item.metadata });
+      if (receipt) recordZoReceipt(receipt);
       if (item.provider === "zo-service" && item.projectPath && item.mode === "http") {
         db.prepare(`UPDATE surface_inventory SET classification=?, canonical_url=COALESCE(?, canonical_url),
           property_id=?, conflict=NULL, next_action=?, last_seen_at=CURRENT_TIMESTAMP

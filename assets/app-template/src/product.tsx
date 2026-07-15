@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { IconArrowBackUp, IconBolt, IconCheck, IconChevronRight, IconDownload, IconExternalLink, IconEye, IconFileAnalytics, IconFlag, IconGitBranch, IconHistory, IconPlus, IconRefresh, IconRoute, IconShieldLock, IconTargetArrow, IconTrash } from "@tabler/icons-react";
+import { IconArrowBackUp, IconBolt, IconCheck, IconChevronRight, IconCloudUpload, IconDownload, IconExternalLink, IconEye, IconFileAnalytics, IconFlag, IconGitBranch, IconHistory, IconPlus, IconRefresh, IconRoute, IconRouteAltLeft, IconShieldLock, IconTargetArrow, IconTrash } from "@tabler/icons-react";
 import { SampleWarning } from "@/components/data-state";
 
 export type SetupData = {
@@ -45,8 +45,9 @@ async function post(path: string, body: Record<string, unknown> = {}) {
 type Delta = { before: number; after: number; change: number; pct: number };
 
 export type LedgerEvent = {
-  id: string; propertyId: string; propertyName: string; source: "commit" | "content" | "tracker" | "manual" | "fix";
+  id: string; propertyId: string; propertyName: string; source: "commit" | "content" | "tracker" | "manual" | "fix" | "deployment" | "space";
   kind: string; title: string; detail: string | null; pageUrl: string | null; occurredAt: string;
+  receipt: { knowledge: "observed" | "inferred"; provider?: string; sourceId?: string; revision?: string; unavailable?: string[] };
   outcome: { windowDays: number; pageviews: Delta; visitors: Delta; engagement: Delta; poorVitals: Delta; seoScore: Delta | null; sampleSize: number; coOccurring: number; confidence: "low" | "medium" | "high" };
 };
 
@@ -58,6 +59,8 @@ const sourceMeta: Record<LedgerEvent["source"], { label: string; icon: typeof Ic
   tracker: { label: "Tracking", icon: IconShieldLock, color: "#58e0c0" },
   manual: { label: "Manual note", icon: IconFlag, color: "#c992ff" },
   fix: { label: "Safe fix", icon: IconBolt, color: "#70d9b9" },
+  deployment: { label: "Zo deployment", icon: IconCloudUpload, color: "#ff9f6e" },
+  space: { label: "Space revision", icon: IconRouteAltLeft, color: "#66d2ff" },
 };
 
 const confidenceColor: Record<string, string> = { low: "text-[#ff8178]", medium: "text-[#efc86b]", high: "text-[#70d9b9]" };
@@ -95,7 +98,7 @@ export function Ledger({ events, properties, onRefresh }: { events: LedgerEvent[
   return <div className="space-y-4">
     <div className="za-panel">
       <div className="flex items-center gap-2 text-[#58e0c0]"><IconHistory size={18}/><p className="text-[10px] font-semibold uppercase tracking-[.14em]">Log a change</p></div>
-      <p className="mt-2 max-w-2xl text-sm text-[#8b9995]">Commits, content edits, tracker installs, and your own notes are lined up against pageviews, visitors, engagement, Core Web Vitals, and SEO score in the surrounding week, so you can see which changes actually moved the needle.</p>
+      <p className="mt-2 max-w-2xl text-sm text-[#8b9995]">Zo publications, service restarts, Space revisions, commits, content edits, tracker installs, and your own notes are lined up against pageviews, visitors, engagement, Core Web Vitals, and SEO score in the surrounding week.</p>
       <div className="mt-5 grid gap-2 sm:grid-cols-[1fr_2fr_auto]">
         <select value={propertyId} onChange={(event) => setPropertyId(event.target.value)} className="za-input">{properties.map((property) => <option key={property.id} value={property.id}>{property.name}</option>)}</select>
         <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="What changed? e.g. Relaunched the pricing page" className="za-input"/>
@@ -115,6 +118,7 @@ export function Ledger({ events, properties, onRefresh }: { events: LedgerEvent[
               <div className="flex flex-wrap items-center gap-2"><p className="text-sm font-medium text-[#e2ebe8]">{event.title}</p><span className="rounded-full bg-white/[.06] px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-[#8b9995]">{meta.label}</span></div>
               <p className="mt-1 truncate text-[10px] uppercase tracking-[.08em] text-[#61706c]">{event.propertyName} · {ledgerWhen(event.occurredAt)}{event.pageUrl ? ` · ${event.pageUrl}` : ""}</p>
               {event.detail && <p className="mt-2 text-xs leading-5 text-[#a8b6b1]">{event.detail}</p>}
+              {(event.receipt.revision || event.receipt.unavailable?.length) && <div className="mt-2 flex flex-wrap gap-2 text-[10px] text-[#71807c]"><span className="rounded bg-white/[.04] px-2 py-1 uppercase tracking-wider">{event.receipt.knowledge}</span>{event.receipt.revision && <span className="rounded bg-white/[.04] px-2 py-1 font-mono">rev {event.receipt.revision}</span>}{event.receipt.unavailable?.length ? <span>Unavailable: {event.receipt.unavailable.join(", ")}</span> : null}</div>}
               <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
                 <DeltaChip label="Pageviews" delta={event.outcome.pageviews} reliable={reliable} />
                 <DeltaChip label="Visitors" delta={event.outcome.visitors} reliable={reliable} />

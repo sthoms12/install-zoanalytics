@@ -3,12 +3,33 @@ import { db, getProperties } from "./db";
 export type ChangeEvent = {
   id: string;
   propertyId: string;
-  source: "commit" | "content" | "tracker" | "manual" | "fix";
+  source: "commit" | "content" | "tracker" | "manual" | "fix" | "deployment" | "space";
   kind: string;
   title: string;
   detail: string | null;
   pageUrl: string | null;
   occurredAt: string;
+  receipt: ChangeReceiptMetadata;
+};
+
+export type ChangeReceiptMetadata = {
+  knowledge: "observed" | "inferred";
+  provider?: string;
+  sourceId?: string;
+  revision?: string;
+  unavailable?: string[];
+};
+
+export type NormalizedReceipt = {
+  propertyId: string;
+  source: "deployment" | "space";
+  kind: "site-published" | "service-restarted" | "space-route-revised";
+  title: string;
+  detail: string;
+  pageUrl: string | null;
+  externalRef: string;
+  occurredAt: string;
+  metadata: ChangeReceiptMetadata;
 };
 
 function id(prefix: string) { return `${prefix}_${crypto.randomUUID()}`; }
@@ -16,8 +37,52 @@ function id(prefix: string) { return `${prefix}_${crypto.randomUUID()}`; }
 const insertEvent = db.prepare(`INSERT INTO change_events (id, property_id, source, kind, title, detail, page_url, external_ref, occurred_at)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(property_id, source, external_ref) DO NOTHING`);
 
+const insertReceipt = db.prepare(`INSERT INTO change_events
+  (id, property_id, source, kind, title, detail, page_url, external_ref, occurred_at, receipt_metadata)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(property_id, source, external_ref) DO NOTHING`);
+
+function text(value: unknown) { return typeof value === "string" && value.trim() ? value.trim() : null; }
+
+export function normalizeZoReceipt(input: {
+  provider: string; sourceId: string; propertyId: string | null; url?: string | null; metadata?: Record<string, unknown>;
+}): NormalizedReceipt | null {
+  if (!input.propertyId) return null;
+  const metadata = input.metadata ?? {};
+  const routeRevision = text(metadata.revisionId) ?? text(metadata.revision);
+  const deploymentRevision = text(metadata.deploymentId) ?? text(metadata.releaseId);
+  const restartRevision = text(metadata.restartId);
+  let source: NormalizedReceipt["source"];
+  let kind: NormalizedReceipt["kind"];
+  let revision: string | null;
+  let title: string;
+  if (input.provider === "zo-space" && routeRevision) {
+    source = "space"; kind = "space-route-revised"; revision = routeRevision; title = `Space route ${input.sourceId} revised`;
+  } else if (input.provider === "zo-site" && deploymentRevision) {
+    source = "deployment"; kind = "site-published"; revision = deploymentRevision; title = "Zo Site published";
+  } else if (input.provider === "zo-service" && restartRevision) {
+    source = "deployment"; kind = "service-restarted"; revision = restartRevision; title = "Zo service restarted";
+  } else return null;
+  const occurredAt = text(metadata.updatedAt) ?? text(metadata.publishedAt) ?? text(metadata.restartedAt) ?? new Date().toISOString();
+  const unavailable = ["actor", "source content"].filter((field) => metadata[field === "actor" ? "actor" : "contentHash"] == null);
+  return {
+    propertyId: input.propertyId, source, kind, title,
+    detail: `${title}. Revision ${revision}. No private source content was captured.`,
+    pageUrl: input.url ?? null,
+    externalRef: `${input.provider}:${input.sourceId}:${kind}:${revision}`,
+    occurredAt,
+    metadata: { knowledge: "observed", provider: input.provider, sourceId: input.sourceId, revision, unavailable },
+  };
+}
+
+export function recordZoReceipt(receipt: NormalizedReceipt) {
+  const result = insertReceipt.run(id("change"), receipt.propertyId, receipt.source, receipt.kind, receipt.title.slice(0, 200),
+    receipt.detail.slice(0, 1000), receipt.pageUrl?.slice(0, 500) ?? null, receipt.externalRef, receipt.occurredAt,
+    JSON.stringify(receipt.metadata));
+  return result.changes > 0;
+}
+
 export function logFixEvent(input: { propertyId: string; kind: string; title: string; detail?: string; externalRef: string }) {
-  insertEvent.run(id("change"), input.propertyId, "fix", input.kind, input.title.slice(0, 200), input.detail?.slice(0, 1000) ?? null, null, input.externalRef, new Date().toISOString());
+  insertReceipt.run(id("change"), input.propertyId, "fix", input.kind, input.title.slice(0, 200), input.detail?.slice(0, 1000) ?? null, null, input.externalRef, new Date().toISOString(), JSON.stringify({ knowledge: "observed" }));
 }
 
 async function syncCommitEvents() {
@@ -32,7 +97,7 @@ async function syncCommitEvents() {
       for (const line of output.split("\n")) {
         const [sha, committedAt, subject] = line.split("\x1f");
         if (!sha || !committedAt) continue;
-        insertEvent.run(id("change"), property.id, "commit", "commit", (subject || "Code change").slice(0, 200), subject?.slice(0, 500) ?? null, null, sha, committedAt);
+        insertReceipt.run(id("change"), property.id, "commit", "commit", (subject || "Code change").slice(0, 200), subject?.slice(0, 500) ?? null, null, sha, committedAt, JSON.stringify({ knowledge: "observed", revision: sha, unavailable: ["private diff"] }));
       }
     } catch { /* not a git repository, or git is unavailable */ }
   }
@@ -41,8 +106,8 @@ async function syncCommitEvents() {
 function syncTrackerEvents() {
   const rows = db.query(`SELECT id AS propertyId, verified_at AS verifiedAt FROM properties
     WHERE verified_at IS NOT NULL AND lifecycle='active'`).all() as Array<{ propertyId: string; verifiedAt: string }>;
-  for (const row of rows) insertEvent.run(id("change"), row.propertyId, "tracker", "tracker-installed",
-    "Analytics tracker verified", "The tracker snippet was confirmed live on the public page.", null, "verified", row.verifiedAt);
+  for (const row of rows) insertReceipt.run(id("change"), row.propertyId, "tracker", "tracker-installed",
+    "Analytics tracker verified", "The tracker snippet was confirmed live on the public page.", null, "verified", row.verifiedAt, JSON.stringify({ knowledge: "observed", unavailable: ["deployment revision"] }));
 }
 
 export function logManualChangeEvent(input: { propertyId: string; title: string; detail?: string; pageUrl?: string; occurredAt?: string }) {
@@ -116,18 +181,21 @@ export async function getLedger() {
     SELECT id, property_id AS propertyId, 'content' AS source, field AS kind,
       (REPLACE(field, '_', ' ') || ' changed') AS title,
       ('from "' || COALESCE(previous_value, '(empty)') || '" to "' || COALESCE(current_value, '(empty)') || '"') AS detail,
-      page_url AS pageUrl, detected_at AS occurredAt
+      page_url AS pageUrl, detected_at AS occurredAt, '{}' AS receiptMetadata
     FROM page_changes WHERE detected_at >= datetime('now', '-180 days')
     UNION ALL
-    SELECT id, property_id AS propertyId, source, kind, title, detail, page_url AS pageUrl, occurred_at AS occurredAt
+    SELECT id, property_id AS propertyId, source, kind, title, detail, page_url AS pageUrl, occurred_at AS occurredAt,
+      receipt_metadata AS receiptMetadata
     FROM change_events WHERE occurred_at >= datetime('now', '-180 days')
     ORDER BY occurredAt DESC LIMIT 300
-  `).all() as ChangeEvent[];
+  `).all() as Array<Omit<ChangeEvent, "receipt"> & { receiptMetadata: string }>;
 
   const properties = new Map(getProperties().map((item) => [item.id, item]));
-  return events.map((event) => {
+  return events.map(({ receiptMetadata, ...event }) => {
     const coOccurring = events.filter((other) => other.id !== event.id && other.propertyId === event.propertyId
       && Math.abs(new Date(other.occurredAt).getTime() - new Date(event.occurredAt).getTime()) <= 7 * 86_400_000).length;
-    return { ...event, propertyName: properties.get(event.propertyId)?.name ?? event.propertyId, outcome: computeOutcome(event.propertyId, event.occurredAt, coOccurring) };
+    const stored = JSON.parse(receiptMetadata || "{}") as Partial<ChangeReceiptMetadata>;
+    const receipt: ChangeReceiptMetadata = { knowledge: stored.knowledge ?? (event.source === "manual" ? "inferred" : "observed"), ...stored };
+    return { ...event, receipt, propertyName: properties.get(event.propertyId)?.name ?? event.propertyId, outcome: computeOutcome(event.propertyId, event.occurredAt, coOccurring) };
   });
 }
