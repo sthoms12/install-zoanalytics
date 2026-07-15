@@ -47,5 +47,6 @@ Dashboard data loading is section-aware: `/api/analytics/summary` provides the p
 
 Workspace Site discovery must anonymously verify the derived `*.zocomputer.io` URL before creating or reactivating a property. A publish block in `zosite.json` does not prove the service is public or currently deployed; unreachable workspace-site rows are retired so private `*.zo.computer` dashboards never become tracker gaps.
 `backend-lib/surfaces.ts` owns the six-state Zo surface inventory, project-path deduplication, conflict reporting, and public-only activation rule. `backend-lib/tracker-install.ts` keeps preview, explicit source apply, republish, and public verification as separate stages.
+Use `aliasOfPropertyId` for public Zo Space content routes so route inventory does not create duplicate properties. Mark private and API-only routes `trackable: false`.
 
 `getActionCenter()` remains the atomic action source. `getActionCampaigns()` groups open actions into work campaigns, and `setActionCampaignState()` updates every child in one SQLite transaction. Keep source verification distinct from manually marking a campaign resolved.

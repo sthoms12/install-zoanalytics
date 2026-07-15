@@ -17,6 +17,7 @@ export type SurfaceObservation = {
   finalUrl?: string | null;
   retired?: boolean;
   trackable?: boolean;
+  aliasOfPropertyId?: string;
   metadata?: Record<string, unknown>;
 };
 
@@ -85,9 +86,9 @@ export function reconcileSurfaces(observations: SurfaceObservation[]): Reconcile
     const conflict = owners && owners.length > 1 && (ownerPaths.size > 1 || ownerPaths.size === 0)
       ? `Multiple unrelated inventory records claim ${canonicalUrl}` : null;
     const matched = canonicalUrl ? properties.find((property) => normalizedUrl(property.url) === canonicalUrl) : null;
-    const propertyId = item.trackable === false ? null : matched?.id ?? ((classification === "public-reachable" || classification === "redirected-alias") && !conflict
+    const propertyId = item.aliasOfPropertyId ?? (item.trackable === false ? null : matched?.id ?? ((classification === "public-reachable" || classification === "redirected-alias") && !conflict
       ? slug(item.sourceId || `${item.kind}-${canonicalUrl}`)
-      : null);
+      : null));
     const action = item.trackable === false ? "No action required; this infrastructure surface is excluded from tracking." : nextAction(classification, matched?.status === "tracked", conflict);
     return { ...item, classification, canonicalUrl, propertyId, conflict, nextAction: action };
   });
@@ -107,7 +108,9 @@ export function persistSurfaceInventory(observations: SurfaceObservation[], reti
 
   db.transaction(() => {
     for (const item of reconciled) {
-      if ((item.classification === "public-reachable" || item.classification === "redirected-alias") && !item.conflict && item.canonicalUrl && item.propertyId) {
+      if (item.aliasOfPropertyId && item.canonicalUrl && (item.classification === "public-reachable" || item.classification === "redirected-alias")) {
+        upsertSurfaceAlias(item.aliasOfPropertyId, item.canonicalUrl);
+      } else if ((item.classification === "public-reachable" || item.classification === "redirected-alias") && !item.conflict && item.canonicalUrl && item.propertyId) {
         const property = upsertDiscoveredProperty({ id: item.propertyId, name: item.name, kind: item.kind, url: item.canonicalUrl, projectPath: item.projectPath, source: item.provider });
         upsertPropertySource({ propertyId: item.propertyId, provider: item.provider, sourceId: item.sourceId, metadata: item.metadata });
         if (item.classification === "redirected-alias" && item.url) upsertSurfaceAlias(item.propertyId, item.url);
