@@ -250,11 +250,12 @@ export function setActionCampaignState(campaignKey: string, status: "open" | "di
   const effectiveStatus = snoozedUntil ? "open" : status;
   const statement = db.prepare(`INSERT INTO action_states (action_key, status, snoozed_until, note) VALUES (?, ?, ?, ?)
     ON CONFLICT(action_key) DO UPDATE SET status=excluded.status, snoozed_until=excluded.snoozed_until, note=excluded.note, updated_at=CURRENT_TIMESTAMP`);
+  let outcomeId: string | null = null;
   const transaction = db.transaction(() => {
     for (const actionKey of campaign.childKeys) statement.run(actionKey, effectiveStatus, snoozedUntil ?? null, note?.slice(0, 500) ?? null);
+    if (status === "resolved" && !snoozedUntil) outcomeId = scheduleCampaignOutcome(campaign);
   });
   transaction();
-  const outcomeId = status === "resolved" && !snoozedUntil ? scheduleCampaignOutcome(campaign) : null;
   return { ok: true, updated: campaign.childKeys.length, outcomeId };
 }
 
