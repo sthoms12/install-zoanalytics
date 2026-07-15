@@ -1,6 +1,7 @@
 import { db, getDashboard, getProperty, getPropertySources } from "./db";
 import { getIntelligence } from "./intelligence";
 import { getActionCampaigns, listFunnels } from "./product";
+import { listCampaignOutcomes } from "./campaign-outcomes";
 import { getLedger } from "./ledger";
 import { listPulseConfig } from "./pulse";
 
@@ -63,7 +64,7 @@ export async function getPropertyWorkspace(propertyId: string, requestedDays = 3
       status: "ready" as const,
       data: {
         goals: signals?.goals.filter(owns) ?? [], funnels: listFunnels().filter(owns),
-        ledger: (await getLedger()).filter(owns), conversions: (signals?.goals.filter(owns) ?? []).reduce((sum: number, goal: any) => sum + Number(goal.conversions || 0), 0),
+        ledger: (await getLedger()).filter(owns), campaignOutcomes: listCampaignOutcomes(propertyId), conversions: (signals?.goals.filter(owns) ?? []).reduce((sum: number, goal: any) => sum + Number(goal.conversions || 0), 0),
       },
       error: intelligence.error,
     },

@@ -24,6 +24,7 @@ export type ActionCampaignData = {
 };
 
 export type SafeFix = { id: string; propertyId: string; actionKey: string | null; code: string; filePath: string; status: "applied" | "reverted"; appliedAt: string; revertedAt: string | null };
+type CampaignOutcome = { id: string; propertyId: string; propertyName: string; title: string; state: string; expectedMeasurement: string; verificationMethod: string; baselineAt: string; dueAt: string; minimumSample: number; sampleBefore: number; sampleAfter: number; overlappingChanges: number; resultDetail: string | null };
 
 type FixPreview = { propertyId: string; code: string; filePath: string; before: string; after: string; changed: boolean; needsValue: boolean; suggestedValue: string | null };
 
@@ -265,20 +266,25 @@ export function ActionCenter({ campaigns, properties, onRefresh }: { campaigns: 
   const [severity, setSeverity] = useState("all");
   const [fixability, setFixability] = useState("all");
   const [message, setMessage] = useState("");
+  const [outcomes, setOutcomes] = useState<CampaignOutcome[]>([]);
 
   async function loadFixes() {
     const response = await fetch("/api/analytics/fixes", { headers: { Accept: "application/json" } });
     const data = await response.json().catch(() => ({ fixes: [] }));
     setFixes(data.fixes ?? []);
   }
-  useEffect(() => { void loadFixes(); }, []);
+  async function loadOutcomes() {
+    const response = await fetch("/api/analytics/campaign-outcomes", { headers: { Accept: "application/json" } });
+    const data = await response.json().catch(() => ({ outcomes: [] })); setOutcomes(data.outcomes ?? []);
+  }
+  useEffect(() => { void loadFixes(); void loadOutcomes(); }, []);
 
   async function updateCampaign(campaign: ActionCampaignData, status: "resolved" | "dismissed", snoozedUntil?: string) {
     setBusy(campaign.key); setMessage("");
     try {
       const response = await fetch(`/api/analytics/action-campaigns/${encodeURIComponent(campaign.key)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status, snoozedUntil }) });
       if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || "Could not update campaign");
-      setMessage(snoozedUntil ? "Campaign snoozed for seven days." : `Campaign marked ${status}.`); await onRefresh();
+      setMessage(snoozedUntil ? "Campaign snoozed for seven days." : `Campaign marked ${status}.`); await loadOutcomes(); await onRefresh();
     } catch (error) { setMessage(error instanceof Error ? error.message : "Could not update campaign"); }
     finally { setBusy(""); }
   }
@@ -296,7 +302,7 @@ export function ActionCenter({ campaigns, properties, onRefresh }: { campaigns: 
     try {
       const response = await fetch(`/api/analytics/action-campaigns/${encodeURIComponent(campaign.key)}/verify`, { method: "POST", headers: { Accept: "application/json" } });
       if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || "Could not verify campaign");
-      setMessage("Source verification completed."); await onRefresh();
+      setMessage("Source verification completed."); await loadOutcomes(); await onRefresh();
     } catch (error) { setMessage(error instanceof Error ? error.message : "Could not verify campaign");
     } finally { setBusy(""); }
   }
@@ -304,6 +310,11 @@ export function ActionCenter({ campaigns, properties, onRefresh }: { campaigns: 
     setRevertBusy(id);
     try { await fetch(`/api/analytics/fixes/${encodeURIComponent(id)}/revert`, { method: "POST" }); await loadFixes(); }
     finally { setRevertBusy(""); }
+  }
+  async function reopenOutcome(id: string) {
+    setBusy(id); setMessage("");
+    try { const response = await fetch(`/api/analytics/campaign-outcomes/${encodeURIComponent(id)}/reopen`, { method: "POST" }); if (!response.ok) throw new Error("Could not reopen campaign"); setMessage("Campaign reopened for another action."); await loadOutcomes(); await onRefresh(); }
+    catch (error) { setMessage(error instanceof Error ? error.message : "Could not reopen campaign"); } finally { setBusy(""); }
   }
   const visible = campaigns.filter((item) => (category === "all" || item.category === category) && (severity === "all" || item.severity === severity) && (fixability === "all" || item.fixability === fixability));
   const categories = [...new Set(campaigns.map((item) => item.category))];
@@ -314,6 +325,7 @@ export function ActionCenter({ campaigns, properties, onRefresh }: { campaigns: 
       const property = properties.find((item) => item.id === campaign.propertyId); const open = expanded === campaign.key;
       return <article key={campaign.key} className="border-b border-white/[.06] last:border-0"><button onClick={() => setExpanded(open ? null : campaign.key)} className="grid w-full grid-cols-[8px_1fr_auto] gap-3 px-2 py-4 text-left"><span className={`mt-1.5 size-2 rounded-full ${campaign.severity === "critical" ? "bg-[#ff8178]" : campaign.severity === "warning" ? "bg-[#efc86b]" : "bg-[#74837f]"}`}/><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="text-sm font-medium text-[#e2ebe8]">{campaign.title}</p><span className="rounded bg-white/[.06] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[.08em] text-[#82918d]">{campaign.fixability === "fixable" ? "Safe Fix ready" : campaign.fixability}</span></div><p className="mt-1 truncate text-[10px] uppercase tracking-[.08em] text-[#61706c]">{property?.name ?? campaign.propertyId} · {campaign.category} · {campaign.affectedPages} affected · priority {campaign.priority}</p></div><IconChevronRight size={16} className={`mt-1 text-[#56645f] transition ${open ? "rotate-90 text-[#58e0c0]" : ""}`}/></button>{open && <div className="mb-5 ml-5 border-l border-[#58e0c0]/20 pl-5"><div className="grid gap-4 py-2 md:grid-cols-3"><Detail label="Why it matters" text={campaign.rationale}/><Detail label="Evidence" text={campaign.representativeEvidence}/><Detail label="Recommended fix" text={campaign.recommendedFix}/></div><div className="mt-3 flex flex-wrap gap-2">{(campaign.category === "tracking" || campaign.category === "site audit") && <button disabled={busy === campaign.key} onClick={() => void verifyCampaign(campaign)} className="za-primary-button">Verify in source</button>}<button disabled={busy === campaign.key} onClick={() => void updateCampaign(campaign, "resolved")} className="za-secondary-button">Mark resolved</button><button disabled={busy === campaign.key} onClick={() => void updateCampaign(campaign, "dismissed")} className="za-secondary-button">Dismiss campaign</button><button disabled={busy === campaign.key} onClick={() => void updateCampaign(campaign, "resolved", new Date(Date.now() + 7 * 86400000).toISOString())} className="za-text-button">Snooze all 7 days</button></div><p className="mt-2 text-[10px] leading-4 text-[#61706c]">Verify in source reruns tracking or the audit. Mark resolved records your decision without changing the source.</p><div className="mt-4 overflow-hidden rounded-lg border border-white/[.07]"><p className="border-b border-white/[.06] bg-white/[.025] px-3 py-2 text-[9px] font-semibold uppercase tracking-[.14em] text-[#65736f]">Affected pages · {campaign.actions.length}</p>{campaign.actions.map((action) => <div key={action.key} className="border-b border-white/[.05] p-3 last:border-0"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-xs font-medium text-[#cbd7d3]">{action.title}</p><p className="mt-1 truncate text-[10px] text-[#61706c]">{action.pageUrl}</p></div><div className="flex shrink-0 gap-1"><button disabled={busy === action.key} onClick={() => void updateAction(action, "resolved")} className="za-text-button">Resolve</button><button disabled={busy === action.key} onClick={() => void updateAction(action, "dismissed")} className="za-text-button">Dismiss</button></div></div><FixLab action={action} onApplied={async () => { await loadFixes(); await onRefresh(); }} /></div>)}</div></div>}</article>;
     })}{!visible.length && <div className="grid min-h-56 place-items-center text-center"><div><IconCheck size={25} className="mx-auto text-[#58e0c0]"/><p className="mt-3 text-sm font-medium">No campaigns match</p><p className="mt-1 text-xs text-[#65736f]">Adjust the filters or run another audit.</p></div></div>}</div></div></section>
+    {outcomes.length > 0 && <div className="za-panel"><p className="text-[10px] font-semibold uppercase tracking-[.14em] text-[#58e0c0]">Campaign follow-up</p><div className="mt-3 space-y-1">{outcomes.slice(0, 10).map((outcome) => <div key={outcome.id} className="grid gap-3 border-b border-white/[.06] py-3 last:border-0 sm:grid-cols-[1fr_auto] sm:items-center"><div><div className="flex flex-wrap items-center gap-2"><p className="text-sm text-[#dce6e3]">{outcome.title}</p><span className="rounded bg-white/[.06] px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-[#82918d]">{outcome.state.replaceAll("-", " ")}</span></div><p className="mt-1 text-[10px] leading-4 text-[#71807c]">{outcome.resultDetail ?? `${outcome.expectedMeasurement} follow-up due ${new Date(outcome.dueAt).toLocaleString()}. Minimum sample: ${outcome.minimumSample}.`}</p><p className="mt-1 text-[9px] text-[#56645f]">{outcome.sampleBefore} before · {outcome.sampleAfter} after{outcome.overlappingChanges ? ` · ${outcome.overlappingChanges} overlapping changes` : ""}</p></div>{["regressed", "unchanged", "verification-failed"].includes(outcome.state) && <button disabled={busy === outcome.id} onClick={() => void reopenOutcome(outcome.id)} className="za-secondary-button">Reopen</button>}</div>)}</div></div>}
     <AppliedFixes fixes={fixes} properties={properties} busyId={revertBusy} onRevert={(id) => void revert(id)} />
   </div>;
 }

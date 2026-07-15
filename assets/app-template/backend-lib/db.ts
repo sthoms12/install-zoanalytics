@@ -55,7 +55,7 @@ export type CollectPayload = {
   campaign?: { source?: string; medium?: string; campaign?: string; content?: string; term?: string };
 };
 
-export const APP_VERSION = "0.10.0";
+export const APP_VERSION = "0.11.0";
 
 export type CrawlPageInput = {
   propertyId: string;
@@ -350,6 +350,33 @@ function migrate() {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS campaign_outcomes (
+      id TEXT PRIMARY KEY,
+      campaign_key TEXT NOT NULL,
+      property_id TEXT NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
+      category TEXT NOT NULL,
+      title TEXT NOT NULL,
+      action_keys TEXT NOT NULL DEFAULT '[]',
+      expected_measurement TEXT NOT NULL,
+      verification_method TEXT NOT NULL,
+      baseline_at TEXT NOT NULL,
+      due_at TEXT NOT NULL,
+      window_hours INTEGER NOT NULL,
+      minimum_sample INTEGER NOT NULL DEFAULT 0,
+      state TEXT NOT NULL DEFAULT 'pending',
+      sample_before INTEGER NOT NULL DEFAULT 0,
+      sample_after INTEGER NOT NULL DEFAULT 0,
+      value_before REAL,
+      value_after REAL,
+      overlapping_changes INTEGER NOT NULL DEFAULT 0,
+      result_detail TEXT,
+      completed_at TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_campaign_outcomes_due ON campaign_outcomes(state, due_at);
+
     CREATE TABLE IF NOT EXISTS funnels (
       id TEXT PRIMARY KEY,
       property_id TEXT NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
@@ -524,6 +551,7 @@ function migrate() {
   db.prepare("INSERT OR IGNORE INTO schema_migrations (version) VALUES (4)").run();
   db.prepare("INSERT OR IGNORE INTO schema_migrations (version) VALUES (5)").run();
   db.prepare("INSERT OR IGNORE INTO schema_migrations (version) VALUES (6)").run();
+  db.prepare("INSERT OR IGNORE INTO schema_migrations (version) VALUES (7)").run();
   db.prepare("INSERT INTO app_settings (key, value) VALUES ('app_version', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP").run(APP_VERSION);
 }
 

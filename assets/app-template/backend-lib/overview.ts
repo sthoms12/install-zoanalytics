@@ -1,6 +1,7 @@
 import { getDashboard } from "./db";
 import { getLedger } from "./ledger";
 import { getActionCampaigns } from "./product";
+import { listCampaignOutcomes } from "./campaign-outcomes";
 
 type LedgerRow = Awaited<ReturnType<typeof getLedger>>[number];
 
@@ -40,6 +41,7 @@ function briefEvent(event: LedgerRow) {
 export async function getOverviewBrief(days = 30) {
   const dashboard = getDashboard(days);
   const [ledger, campaigns] = await Promise.all([getLedger(), Promise.resolve(getActionCampaigns())]);
+  const campaignOutcomes = listCampaignOutcomes() as Array<Record<string, any>>;
   const completed = ledger.filter((event) => event.outcome.sampleSize >= 20 && event.outcome.confidence !== "low").map(briefEvent).filter((event) => event.direction);
   const pending = ledger.filter((event) => event.outcome.sampleSize < 20 || event.outcome.confidence === "low").slice(0, 6).map(briefEvent);
   const qualityExceptions = dashboard.dataQuality.properties.flatMap((property) => {
@@ -64,6 +66,9 @@ export async function getOverviewBrief(days = 30) {
     regressions: completed.filter((event) => event.direction === "regression").slice(0, 4),
     pending,
     campaigns: campaigns.slice(0, 3),
+    verifiedCampaigns: campaignOutcomes.filter((item) => ["fixed-verified", "improved"].includes(item.state)).slice(0, 4),
+    campaignFollowups: campaignOutcomes.filter((item) => ["pending", "awaiting-verification", "insufficient-sample", "confounded"].includes(item.state)).slice(0, 6),
+    campaignRegressions: campaignOutcomes.filter((item) => ["regressed", "verification-failed"].includes(item.state)).slice(0, 4),
     qualityExceptions: qualityExceptions.slice(0, 8),
     setupHealth: dashboard.dataQuality.counts,
   };

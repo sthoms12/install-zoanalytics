@@ -91,16 +91,18 @@ type PropertyWorkspaceData = {
   audience: { status: string; error: string | null; data: { topPages: Dashboard["topPages"]; recentActivity: Dashboard["recentActivity"]; referrers: Dashboard["referrerSummary"]; devices: Dashboard["deviceSummary"]; events: Dashboard["eventSummary"] } };
   visibility: { status: string; error: string | null; data: { pages: Dashboard["latestCrawledPages"]; findings: Dashboard["seoFindings"]; rankings: Dashboard["rankVisibility"]; authority: Dashboard["authorityScores"]; vitals: Intelligence["vitals"] } };
   improve: { status: string; error: string | null; data: { campaigns: ActionCampaignData[]; opportunities: Dashboard["opportunityPages"]; errors: Intelligence["errors"] } };
-  outcomes: { status: string; error: string | null; data: { goals: Intelligence["goals"]; funnels: FunnelData[]; ledger: LedgerEvent[]; conversions: number } };
+  outcomes: { status: string; error: string | null; data: { goals: Intelligence["goals"]; funnels: FunnelData[]; ledger: LedgerEvent[]; campaignOutcomes: CampaignOutcomeSummary[]; conversions: number } };
 };
 type OverviewBriefData = {
   generatedAt: string; range: { days: number; label: string };
   portfolio: { pageviews: number; visitors: number; activeProperties: number; properties: number; pageviewsComparison: ComparisonQuality; visitorsComparison: ComparisonQuality };
   wins: OverviewEvent[]; regressions: OverviewEvent[]; pending: OverviewEvent[];
   campaigns: ActionCampaignData[];
+  verifiedCampaigns: CampaignOutcomeSummary[]; campaignFollowups: CampaignOutcomeSummary[]; campaignRegressions: CampaignOutcomeSummary[];
   qualityExceptions: Array<{ propertyId: string; propertyName: string; source: string; state: DataQualitySignal["state"]; label: string; explanation: string; observedAt: string | null; ageMinutes: number | null }>;
   setupHealth: Dashboard["dataQuality"]["counts"];
 };
+type CampaignOutcomeSummary = { id: string; propertyId: string; propertyName: string; title: string; state: string; sampleBefore: number; sampleAfter: number; dueAt: string; resultDetail: string | null; overlappingChanges: number };
 type OverviewEvent = { id: string; propertyId: string; propertyName: string; source: string; title: string; occurredAt: string; confidence: "low" | "medium" | "high"; sampleSize: number; direction: "win" | "regression" | null; metric: string | null; metricLabel: string | null; change: number; wording: string };
 const primaryAreas: Array<{ id: PrimaryArea; label: string; icon: typeof IconRadar; defaultView: View }> = [
   { id: "overview", label: "Overview", icon: IconRadar, defaultView: "overview" },
@@ -387,6 +389,10 @@ function Overview({ data, brief, name, onSelectProperty, onOpenActions }: { data
       <OutcomeBrief title="Recent wins" eyebrow="Observed after changes · confidence gated" events={brief?.wins ?? []} tone="win" onSelectProperty={onSelectProperty} />
       <OutcomeBrief title="Recent regressions" eyebrow="Observed after changes · confidence gated" events={brief?.regressions ?? []} tone="regression" onSelectProperty={onSelectProperty} />
     </section>
+    <section className="grid gap-4 xl:grid-cols-2">
+      <Panel title="Verified campaign fixes" eyebrow="Source checks and sufficient evidence" icon={IconCheck}><CampaignOutcomeRows rows={brief?.verifiedCampaigns ?? []} onSelectProperty={onSelectProperty} empty="No campaign fixes have been verified yet." /></Panel>
+      <Panel title="Campaigns gathering evidence" eyebrow="Scheduled follow-up windows" icon={IconHistory}><CampaignOutcomeRows rows={brief?.campaignFollowups ?? []} onSelectProperty={onSelectProperty} empty="No campaign follow-ups are pending." /></Panel>
+    </section>
     <section className="grid gap-4 xl:grid-cols-[1.1fr_.9fr]">
       <Panel title="Top work campaigns" eyebrow="The next three decisions" icon={IconTargetArrow}><div className="space-y-2">{(brief?.campaigns ?? []).map((campaign) => <button key={campaign.key} onClick={onOpenActions} className="flex w-full items-center justify-between gap-4 rounded-lg border border-white/[.06] bg-white/[.025] p-3 text-left transition hover:border-[#58e0c0]/25 hover:bg-[#58e0c0]/[.035]"><div><p className="text-sm font-medium text-[#dce6e3]">{campaign.title}</p><p className="mt-1 text-[11px] text-[#71807c]">{propertyName(data.properties, campaign.propertyId)} · {campaign.affectedPages} affected · {campaign.fixability.replace("-", " ")}</p></div><IconChevronRight size={16} className="shrink-0 text-[#58e0c0]" /></button>)}{!brief?.campaigns.length && <Empty icon={IconCheck} title="No open campaigns" text="The portfolio has no open grouped work campaigns." />}</div></Panel>
       <Panel title="Changes gathering evidence" eyebrow="Not yet labeled a win or regression" icon={IconHistory}><div className="space-y-2">{(brief?.pending ?? []).slice(0, 4).map((event) => <button key={event.id} onClick={() => onSelectProperty(event.propertyId)} className="w-full rounded-lg border border-white/[.06] bg-white/[.02] p-3 text-left"><p className="text-sm text-[#dce6e3]">{event.title}</p><p className="mt-1 text-[10px] text-[#71807c]">{event.propertyName} · {event.sampleSize}/20 observations · {relativeTime(event.occurredAt)}</p></button>)}{!brief?.pending.length && <Empty icon={IconHistory} title="No pending changes" text="New changes will wait here until enough post-change evidence exists." />}</div></Panel>
@@ -394,6 +400,10 @@ function Overview({ data, brief, name, onSelectProperty, onOpenActions }: { data
     <Panel title="Property portfolio" eyebrow="Traffic, health and recency" icon={IconGlobe}><PropertyTable data={data} onSelect={onSelectProperty} /></Panel>
     <Panel title="Supporting traffic trend" eyebrow={`${name} · ${data.range.label}`} icon={IconChartAreaLine}><TrafficChart data={data.trend} /></Panel>
   </div>;
+}
+
+function CampaignOutcomeRows({ rows, onSelectProperty, empty }: { rows: CampaignOutcomeSummary[]; onSelectProperty: (id: string) => void; empty: string }) {
+  return <div className="space-y-2">{rows.map((item) => <button key={item.id} onClick={() => onSelectProperty(item.propertyId)} className="w-full rounded-lg border border-white/[.06] bg-white/[.02] p-3 text-left"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm text-[#dce6e3]">{item.title}</p><span className="text-[9px] uppercase tracking-wider text-[#58e0c0]">{item.state.replaceAll("-", " ")}</span></div><p className="mt-1 text-[10px] leading-4 text-[#71807c]">{item.resultDetail ?? `${item.sampleAfter} observations collected; follow-up due ${relativeTime(item.dueAt)}.`}</p></button>)}{!rows.length && <p className="py-6 text-center text-xs text-[#65736f]">{empty}</p>}</div>;
 }
 
 function OutcomeBrief({ title, eyebrow, events, tone, onSelectProperty }: { title: string; eyebrow: string; events: OverviewEvent[]; tone: "win" | "regression"; onSelectProperty: (id: string) => void }) {

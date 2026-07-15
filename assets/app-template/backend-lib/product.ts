@@ -1,6 +1,7 @@
 import { db, getProperties, getProperty, APP_VERSION } from "./db";
 import { FIXABLE_CODES } from "./fixes";
 import { listSurfaceInventory } from "./surfaces";
+import { scheduleCampaignOutcome } from "./campaign-outcomes";
 
 type FunnelStep = { type: "page" | "event"; value: string };
 
@@ -253,7 +254,8 @@ export function setActionCampaignState(campaignKey: string, status: "open" | "di
     for (const actionKey of campaign.childKeys) statement.run(actionKey, effectiveStatus, snoozedUntil ?? null, note?.slice(0, 500) ?? null);
   });
   transaction();
-  return { ok: true, updated: campaign.childKeys.length };
+  const outcomeId = status === "resolved" && !snoozedUntil ? scheduleCampaignOutcome(campaign) : null;
+  return { ok: true, updated: campaign.childKeys.length, outcomeId };
 }
 
 export function getPageDetail(propertyId: string, path: string) {

@@ -16,6 +16,7 @@ import { startWeeklyRefreshScheduler } from "./backend-lib/scheduler";
 import { getPropertyWorkspace } from "./backend-lib/workspace";
 import { listSurfaceInventory, persistSurfaceInventory } from "./backend-lib/surfaces";
 import { applyTrackerInstall, previewTrackerInstall } from "./backend-lib/tracker-install";
+import { listCampaignOutcomes, recordCampaignVerification, reopenCampaignOutcome } from "./backend-lib/campaign-outcomes";
 
 type Mode = "development" | "production";
 const app = new Hono();
@@ -81,6 +82,11 @@ app.patch("/api/analytics/pulse/config/:propertyId", async (c) => {
 app.post("/api/analytics/pulse/refresh", (c) => c.json({ snapshot: refreshPulseSnapshot() }));
 app.get("/api/analytics/actions", (c) => c.json({ actions: getActionCenter() }));
 app.get("/api/analytics/action-campaigns", (c) => c.json({ campaigns: getActionCampaigns() }));
+app.get("/api/analytics/campaign-outcomes", (c) => c.json({ outcomes: listCampaignOutcomes(c.req.query("propertyId")) }));
+app.post("/api/analytics/campaign-outcomes/:id/reopen", (c) => {
+  try { return c.json(reopenCampaignOutcome(c.req.param("id"))); }
+  catch (error) { return c.json({ error: error instanceof Error ? error.message : "Could not reopen campaign" }, 404); }
+});
 app.patch("/api/analytics/action-campaigns/:key", async (c) => {
   const body = await c.req.json().catch(() => ({}));
   if (!["open", "dismissed", "resolved"].includes(body.status)) return c.json({ error: "Valid status is required" }, 400);
@@ -92,11 +98,14 @@ app.post("/api/analytics/action-campaigns/:key/verify", async (c) => {
   if (!campaign) return c.json({ error: "Action campaign not found" }, 404);
   if (campaign.category === "tracking") {
     const results = await Promise.all([...new Set(campaign.actions.map((item) => item.propertyId))].map((propertyId) => verifyTracker(propertyId, collectorOrigin)));
+    recordCampaignVerification(campaign, results.every((item) => item.ok), results.every((item) => item.ok) ? "Tracker delivery was verified on the public surface." : "Tracker verification failed; the campaign was reopened.");
     return c.json({ verified: results.every((item) => item.ok), results, campaign: getActionCampaigns().find((item) => item.key === campaign.key) ?? null });
   }
   if (campaign.category === "site audit" || campaign.category === "data health") {
     await crawlProperty(campaign.propertyId, 20);
-    return c.json({ verified: !getActionCampaigns().some((item) => item.key === campaign.key), campaign: getActionCampaigns().find((item) => item.key === campaign.key) ?? null });
+    const verified = !getActionCampaigns().some((item) => item.key === campaign.key);
+    recordCampaignVerification(campaign, verified, verified ? "The originating crawl finding is no longer present." : "The originating finding remains after verification; the campaign was reopened.");
+    return c.json({ verified, campaign: getActionCampaigns().find((item) => item.key === campaign.key) ?? null });
   }
   return c.json({ error: "This campaign needs manual verification" }, 400);
 });
