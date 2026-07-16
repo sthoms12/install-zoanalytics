@@ -7,6 +7,7 @@ const dbPath = join(process.cwd(), "data", "zoanalytics.db");
 mkdirSync(dirname(dbPath), { recursive: true });
 
 export const db = new Database(dbPath, { create: true });
+db.exec("PRAGMA busy_timeout = 5000;");
 db.exec("PRAGMA journal_mode = WAL;");
 db.exec("PRAGMA foreign_keys = ON;");
 
