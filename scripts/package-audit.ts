@@ -4,6 +4,7 @@ import { join, relative, resolve } from "node:path";
 const root = resolve(import.meta.dir, "..");
 const template = join(root, "assets", "app-template");
 const forbiddenEntries = ["node_modules", "dist", "data", ".env", "zosite.json"];
+const forbiddenRootEntries = ["data", "node_modules", "dist", ".env", "zosite.json"];
 const forbiddenText = [
   /thomstech/gi,
   /sthoms/gi,
@@ -25,8 +26,14 @@ function files(directory: string): string[] {
 }
 
 const errors: string[] = [];
+for (const entry of forbiddenRootEntries) if (existsSync(join(root, entry))) errors.push(`Forbidden installer artifact: ${entry}`);
 for (const entry of forbiddenEntries) if (existsSync(join(template, entry))) errors.push(`Forbidden template entry: ${entry}`);
 if (!existsSync(join(template, "zosite.template.json"))) errors.push("Missing zosite.template.json");
+
+const skill = readFileSync(join(root, "SKILL.md"), "utf8");
+if (!skill.startsWith("---\n") || !/^name:\s*install-zoanalytics\s*$/m.test(skill) || !/^description:\s*\S.+$/m.test(skill)) {
+  errors.push("SKILL.md is missing valid install-zoanalytics frontmatter");
+}
 
 const candidates = files(template).filter((path) => !path.endsWith("bun.lock"));
 for (const path of candidates) {

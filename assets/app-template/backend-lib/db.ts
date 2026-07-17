@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { assessComparison, assessFreshness, assessTracker } from "./confidence";
 
-const dbPath = join(process.cwd(), "data", "zoanalytics.db");
+const dbPath = process.env.ZOANALYTICS_DB_PATH || join(process.cwd(), "data", "zoanalytics.db");
 mkdirSync(dirname(dbPath), { recursive: true });
 
 export const db = new Database(dbPath, { create: true });

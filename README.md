@@ -56,3 +56,13 @@ bun run scripts/update.ts --target /home/workspace/zoanalytics
 ```
 
 Runs preflight, backs up the database and prior source, preserves your database, Pulse choices, `.env`, and `zosite.json`, then builds and runs the doctor. Failed updates restore the previous application source automatically.
+
+## Release validation
+
+Before publishing a release, run the complete installer release check with Bun 1.3.0 and the current stable Bun release:
+
+```bash
+bun scripts/release-check.ts
+```
+
+The check audits package hygiene, performs a clean installation, type-checks, tests, builds, runs the doctor, and verifies the collector-only HTTP boundary.
