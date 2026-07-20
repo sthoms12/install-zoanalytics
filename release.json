@@ -1,13 +1,15 @@
 {
-  "version": "0.14.0",
-  "released_at": "2026-07-15",
+  "version": "0.15.0",
+  "released_at": "2026-07-20",
   "minimum_bun": "1.3.0",
-  "summary": "Guided Umami and Plausible migration with dry runs, provenance, duplicate protection, and an improved first-run path.",
+  "summary": "Higher-quality SEO keyword inference and safer automatic rank-watch seeding.",
   "highlights": [
     "Discovers and classifies Zo Space routes, Sites, services, aliases, and external production surfaces",
     "Connects changes and fixes to evidence-backed follow-up outcomes",
     "Generates a deterministic weekly owner brief without an LLM",
     "Preserves the embedded SQLite database and opt-in Pulse configuration during updates",
-    "Imports Umami event history or Plausible aggregate history without inventing sessions"
+    "Imports Umami event history or Plausible aggregate history without inventing sessions",
+    "Infers weighted search-intent phrases from page metadata, paths, and visible copy",
+    "Seeds automatic rank watches only from the latest successful crawl while preserving manual terms"
   ]
 }

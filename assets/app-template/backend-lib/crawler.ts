@@ -1,4 +1,5 @@
 import { finishCrawlRun, getProperties, getProperty, saveCrawledPage, startCrawlRun, type CrawlPageInput, type Property } from "./db";
+import { inferKeywordCandidates } from "./keyword-quality";
 
 type CrawlResult = {
   runId: string;
@@ -8,32 +9,6 @@ type CrawlResult = {
   status: "completed" | "failed";
   error?: string;
 };
-
-const STOPWORDS = new Set([
-  "about",
-  "after",
-  "also",
-  "and",
-  "are",
-  "because",
-  "been",
-  "but",
-  "can",
-  "from",
-  "have",
-  "into",
-  "its",
-  "more",
-  "not",
-  "our",
-  "that",
-  "the",
-  "their",
-  "this",
-  "with",
-  "you",
-  "your",
-]);
 
 export async function crawlProperty(propertyId: string, maxPages = 25): Promise<CrawlResult> {
   const property = getProperty(propertyId);
@@ -167,7 +142,13 @@ async function inspectPage(property: Property, url: string): Promise<CrawlPageIn
     loadMs,
     seoScore: scorePage(issues),
     issues,
-    keywords: inferKeywords([title, description, h1, text].filter(Boolean).join(" ")),
+    keywords: inferKeywordCandidates([
+      { value: title, weight: 6 },
+      { value: h1, weight: 5 },
+      { value: description, weight: 3 },
+      { value: new URL(url).pathname.replaceAll("/", " ").replaceAll("-", " "), weight: 4 },
+      { value: text, weight: 1 },
+    ]),
     internalUrls: links.internal,
     externalUrls: links.external,
   };
@@ -325,21 +306,6 @@ function scorePage(issues: CrawlPageInput["issues"]) {
     return sum + 5;
   }, 0);
   return Math.max(0, Math.min(100, 100 - penalty));
-}
-
-function inferKeywords(text: string) {
-  const words = visibleText(text)
-    .toLowerCase()
-    .match(/[a-z][a-z0-9-]{2,}/g) ?? [];
-  const counts = new Map<string, number>();
-  for (const word of words) {
-    if (STOPWORDS.has(word)) continue;
-    counts.set(word, (counts.get(word) ?? 0) + 1);
-  }
-  return [...counts.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 12)
-    .map(([keyword, weight]) => ({ keyword, weight, source: "page-copy" }));
 }
 
 function visibleText(html: string) {

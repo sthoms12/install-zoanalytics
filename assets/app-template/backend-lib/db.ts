@@ -56,7 +56,7 @@ export type CollectPayload = {
   campaign?: { source?: string; medium?: string; campaign?: string; content?: string; term?: string };
 };
 
-export const APP_VERSION = "0.14.0";
+export const APP_VERSION = "0.15.0";
 
 export type CrawlPageInput = {
   propertyId: string;
@@ -577,12 +577,14 @@ function migrate() {
   ensureColumn("properties", "last_discovered_at", "TEXT");
   ensureColumn("properties", "lifecycle", "TEXT NOT NULL DEFAULT 'active'");
   ensureColumn("properties", "retired_at", "TEXT");
+  ensureColumn("rank_watchlist", "source", "TEXT NOT NULL DEFAULT 'legacy-auto'");
   db.prepare("UPDATE properties SET lifecycle='retired', retired_at=COALESCE(retired_at, CURRENT_TIMESTAMP) WHERE url NOT LIKE 'http%'").run();
   db.prepare("INSERT OR IGNORE INTO schema_migrations (version) VALUES (4)").run();
   db.prepare("INSERT OR IGNORE INTO schema_migrations (version) VALUES (5)").run();
   db.prepare("INSERT OR IGNORE INTO schema_migrations (version) VALUES (6)").run();
   db.prepare("INSERT OR IGNORE INTO schema_migrations (version) VALUES (7)").run();
   db.prepare("INSERT OR IGNORE INTO schema_migrations (version) VALUES (8)").run();
+  db.prepare("INSERT OR IGNORE INTO schema_migrations (version) VALUES (9)").run();
   db.prepare("INSERT INTO app_settings (key, value) VALUES ('app_version', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP").run(APP_VERSION);
 }
 

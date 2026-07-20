@@ -1,7 +1,9 @@
 import { Glob } from "bun";
+import type { Database } from "bun:sqlite";
 import { db, getProperties, upsertDiscoveredProperty, upsertPropertySource, upsertSurfaceAlias } from "./db";
 import { getActionCenter } from "./product";
 import { persistSurfaceInventory, type SurfaceObservation } from "./surfaces";
+import { isUsefulKeyword } from "./keyword-quality";
 
 const WORKSPACE = "/home/workspace";
 
@@ -236,8 +238,8 @@ export function createGoal(input: { propertyId: string; name: string; eventName:
 
 export function addRankKeyword(input: { propertyId: string; keyword: string; targetUrl?: string }) {
   const watchId = id("rankwatch");
-  db.prepare(`INSERT INTO rank_watchlist (id, property_id, keyword, target_url) VALUES (?, ?, ?, ?)
-    ON CONFLICT(property_id, keyword) DO UPDATE SET target_url=excluded.target_url, active=1`)
+  db.prepare(`INSERT INTO rank_watchlist (id, property_id, keyword, target_url, source) VALUES (?, ?, ?, ?, 'manual')
+    ON CONFLICT(property_id, keyword) DO UPDATE SET target_url=excluded.target_url, active=1, source='manual'`)
     .run(watchId, input.propertyId, input.keyword.slice(0, 150), input.targetUrl?.slice(0, 500) ?? null);
   return { id: watchId };
 }
@@ -314,11 +316,31 @@ function bootstrapDefaults() {
     goalInsert.run(`goal_${property.id}_outbound`, property.id, "Outbound clicks", "outbound-click");
     goalInsert.run(`goal_${property.id}_download`, property.id, "Downloads", "download");
   }
-  const keywords = db.query(`SELECT property_id AS propertyId, keyword, MAX(weight) AS weight FROM keyword_candidates
-    GROUP BY property_id, keyword ORDER BY weight DESC LIMIT 20`).all() as Array<{ propertyId: string; keyword: string }>;
+  refreshAutomaticRankWatches();
+}
+
+export function refreshAutomaticRankWatches(database: Database = db) {
+  database.prepare("UPDATE rank_watchlist SET active=0 WHERE source IN ('auto','legacy-auto')").run();
+  const keywords = database.query(`WITH latest AS (
+      SELECT property_id, id, ROW_NUMBER() OVER (PARTITION BY property_id ORDER BY started_at DESC) AS position
+      FROM crawl_runs WHERE status='completed'
+    )
+    SELECT k.property_id AS propertyId, k.keyword, MAX(k.weight) AS weight
+    FROM keyword_candidates k
+    JOIN latest l ON l.id=k.run_id AND l.position=1
+    JOIN properties p ON p.id=k.property_id AND p.lifecycle='active'
+    GROUP BY k.property_id, k.keyword
+    ORDER BY k.property_id, weight DESC, k.keyword`).all() as Array<{ propertyId: string; keyword: string; weight: number }>;
   const counts = new Map<string, number>();
-  const insert = db.prepare("INSERT OR IGNORE INTO rank_watchlist (id, property_id, keyword, target_url) VALUES (?, ?, ?, (SELECT url FROM properties WHERE id=?))");
+  const insert = database.prepare(`INSERT INTO rank_watchlist (id, property_id, keyword, target_url, active, source)
+    VALUES (?, ?, ?, (SELECT url FROM properties WHERE id=?), 1, 'auto')
+    ON CONFLICT(property_id, keyword) DO UPDATE SET
+      active=1,
+      target_url=COALESCE(rank_watchlist.target_url, excluded.target_url),
+      source=CASE WHEN rank_watchlist.source='manual' THEN 'manual' ELSE 'auto' END`);
   for (const item of keywords) {
+    if (!isUsefulKeyword(item.keyword)) continue;
+    if (item.weight < 3) continue;
     const count = counts.get(item.propertyId) ?? 0; if (count >= 3) continue;
     insert.run(id("rankwatch"), item.propertyId, item.keyword, item.propertyId);
     counts.set(item.propertyId, count + 1);
