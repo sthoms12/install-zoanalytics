@@ -55,7 +55,7 @@
     "@types/bun": "1.2.21",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
-    "typescript": "^5.9.3"
+    "typescript": "^7.0.2"
   },
   "overrides": {
     "@hono/node-server": "^2.0.12",
