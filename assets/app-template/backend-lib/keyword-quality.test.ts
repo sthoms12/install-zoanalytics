@@ -8,7 +8,7 @@ describe("keyword quality", () => {
 
   test("prefers intent-bearing phrases from important fields", () => {
     const candidates = inferKeywordCandidates([
-      { value: "Free Mortgage Calculator | CalcWorks", weight: 6 },
+      { value: "Free Mortgage Calculator | Example Product", weight: 6 },
       { value: "Mortgage Calculator", weight: 5 },
       { value: "Estimate monthly mortgage payments and total interest.", weight: 3 },
       { value: "Use this calculator to estimate mortgage payments.", weight: 1 },

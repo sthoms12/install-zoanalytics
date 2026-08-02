@@ -16,6 +16,14 @@ const forbiddenText = [
   /b4wemeet/gi,
   /formuladeck/gi,
   /omniunit/gi,
+  /(?:https?:\/\/)?[a-z0-9-]+-(?:thomstech|sthoms)[.]zo(?:computer)?[.](?:io|computer)/gi,
+  /(?:thomstech|sthoms)[.]zo[.](?:space|computer)/gi,
+];
+
+const credentialText = [
+  /\b(?:sk|ghp|github_pat|xox[baprs])-[-_A-Za-z0-9]{12,}\b/g,
+  /\bBearer\s+[-._~+/A-Za-z0-9]{16,}={0,2}\b/g,
+  /\b(?:ZO_CLIENT_IDENTITY_TOKEN|ZO_API_KEY)\s*[=:]\s*["']?(?!none\b|YOUR_)[^\s"']{8,}/g,
 ];
 
 function files(directory: string): string[] {
@@ -42,11 +50,18 @@ for (const path of candidates) {
     pattern.lastIndex = 0;
     if (pattern.test(content)) errors.push(`Personal marker ${pattern.source} in ${relative(root, path)}`);
   }
+  for (const pattern of credentialText) {
+    pattern.lastIndex = 0;
+    if (pattern.test(content)) errors.push(`Credential-like value in ${relative(root, path)}`);
+  }
 }
 
 for (const path of files(root).filter((item) => !item.includes("/assets/app-template/") && !item.includes("/.git/") && !item.endsWith("bun.lock"))) {
   const content = readFileSync(path, "utf8");
-  if (/\b(?:sk|ghp|github_pat|xox[baprs])-[-_A-Za-z0-9]{12,}\b/.test(content)) errors.push(`Credential-like value in ${relative(root, path)}`);
+  for (const pattern of credentialText) {
+    pattern.lastIndex = 0;
+    if (pattern.test(content)) errors.push(`Credential-like value in ${relative(root, path)}`);
+  }
 }
 
 const result = { ok: errors.length === 0, files: candidates.length, template: relative(root, template), errors };

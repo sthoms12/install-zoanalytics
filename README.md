@@ -1,8 +1,8 @@
 # ZoAnalytics
 
-The analytics and website-intelligence system built for [Zo Computer](https://zo.computer). ZoAnalytics discovers what you run, measures what visitors experience, identifies what needs attention, helps you apply safe fixes, verifies the result, and learns from the outcome. Your data stays on your Zo.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**Live example:** [zoanalytics-thomstech.zocomputer.io/pulse](https://zoanalytics-thomstech.zocomputer.io/pulse) — the public, opt-in snapshot view of a real running instance. It shows only aggregated metrics an owner chooses to publish (pageviews, visitors, trend, audit score); the private dashboard behind it stays authenticated and off-limits.
+The analytics and website-intelligence system built for [Zo Computer](https://zo.computer). ZoAnalytics discovers what you run, measures what visitors experience, identifies what needs attention, helps you apply safe fixes, verifies the result, and learns from the outcome. Your data stays on your Zo.
 
 ## What you get
 
@@ -66,3 +66,7 @@ bun scripts/release-check.ts
 ```
 
 The check audits package hygiene, performs a clean installation, type-checks, tests, builds, runs the doctor, and verifies the collector-only HTTP boundary.
+
+## License
+
+ZoAnalytics is available under the [MIT License](LICENSE).

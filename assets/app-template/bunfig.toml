@@ -8,4 +8,12 @@
 
 [install]
 minimumReleaseAge = 604800 # seconds == 7 days
-minimumReleaseAgeExcludes = ["@types/bun", "typescript"]
+minimumReleaseAgeExcludes = [
+  "@hono/node-server",
+  "@types/bun",
+  "brace-expansion",
+  "fast-uri",
+  "postcss",
+  "react-router",
+  "typescript",
+]
